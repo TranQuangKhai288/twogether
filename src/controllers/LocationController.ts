@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { ApiResponse } from "../types/index";
 import { AppError } from "../utils/AppError";
-import { LocationShareService } from "../database/services/LocationShareService";
+import { LocationShareRepository } from "../database/repositories/LocationShareRepository";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export class LocationController {
@@ -20,7 +20,7 @@ export class LocationController {
         );
       }
 
-      const locationShare = await LocationShareService.shareLocation(
+      const locationShare = await LocationShareRepository.shareLocation(
         coupleId,
         userId,
         { lat, lng, duration }
@@ -53,7 +53,7 @@ export class LocationController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      const locations = await LocationShareService.getCurrentSharedLocations(
+      const locations = await LocationShareRepository.getCurrentSharedLocations(
         coupleId,
         userId
       );
@@ -85,7 +85,7 @@ export class LocationController {
       const requestUserId = req.user!._id.toString();
       const { coupleId, userId } = req.params;
 
-      const location = await LocationShareService.getUserCurrentLocation(
+      const location = await LocationShareRepository.getUserCurrentLocation(
         coupleId,
         userId,
         requestUserId
@@ -125,7 +125,7 @@ export class LocationController {
         throw new AppError("Latitude and longitude are required", 400);
       }
 
-      const locationShare = await LocationShareService.updateLocation(
+      const locationShare = await LocationShareRepository.updateLocation(
         coupleId,
         userId,
         { lat, lng, extendDuration }
@@ -158,7 +158,7 @@ export class LocationController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      await LocationShareService.stopSharingLocation(coupleId, userId);
+      await LocationShareRepository.stopSharingLocation(coupleId, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -184,7 +184,7 @@ export class LocationController {
         throw new AppError("Additional minutes must be a positive number", 400);
       }
 
-      const locationShare = await LocationShareService.extendLocationSharing(
+      const locationShare = await LocationShareRepository.extendLocationSharing(
         coupleId,
         userId,
         additionalMinutes
@@ -226,7 +226,7 @@ export class LocationController {
         offset: offset ? parseInt(offset as string) : undefined,
       };
 
-      const result = await LocationShareService.getLocationHistory(
+      const result = await LocationShareRepository.getLocationHistory(
         coupleId,
         userId,
         options
@@ -262,10 +262,11 @@ export class LocationController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      const result = await LocationShareService.calculateDistanceBetweenUsers(
-        coupleId,
-        userId
-      );
+      const result =
+        await LocationShareRepository.calculateDistanceBetweenUsers(
+          coupleId,
+          userId
+        );
 
       const response: ApiResponse = {
         success: true,
@@ -309,7 +310,7 @@ export class LocationController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      const stats = await LocationShareService.getLocationStats(
+      const stats = await LocationShareRepository.getLocationStats(
         coupleId,
         userId
       );
@@ -330,7 +331,7 @@ export class LocationController {
    */
   public cleanupExpiredShares = asyncHandler(
     async (_req: Request, res: Response): Promise<void> => {
-      const deletedCount = await LocationShareService.cleanupExpiredShares();
+      const deletedCount = await LocationShareRepository.cleanupExpiredShares();
 
       const response: ApiResponse = {
         success: true,

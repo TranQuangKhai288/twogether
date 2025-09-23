@@ -1,14 +1,14 @@
 import { Request, Response } from "express";
 import { ApiResponse } from "../types/index";
 import { AppError } from "../utils/AppError";
-import { CoupleInvitationService } from "../database/services/CoupleInvitationService";
+import { CoupleInvitationRepository } from "../database/repositories/CoupleInvitationRepository";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export class CoupleInvitationController {
-  private invitationService: CoupleInvitationService;
+  private invitationRepository: CoupleInvitationRepository;
 
   constructor() {
-    this.invitationService = new CoupleInvitationService();
+    this.invitationRepository = new CoupleInvitationRepository();
   }
 
   /**
@@ -34,21 +34,21 @@ export class CoupleInvitationController {
 
         switch (action) {
           case "accept":
-            result = await this.invitationService.acceptInvitation(
+            result = await this.invitationRepository.acceptInvitation(
               id,
               userId.toString()
             );
             message = "Invitation accepted successfully! Couple created.";
             break;
           case "reject":
-            result = await this.invitationService.rejectInvitation(
+            result = await this.invitationRepository.rejectInvitation(
               id,
               userId.toString()
             );
             message = "Invitation rejected successfully";
             break;
           case "cancel":
-            result = await this.invitationService.cancelInvitation(
+            result = await this.invitationRepository.cancelInvitation(
               id,
               userId.toString()
             );
@@ -90,7 +90,7 @@ export class CoupleInvitationController {
         );
       }
 
-      const invitation = await this.invitationService.sendInvitation(
+      const invitation = await this.invitationRepository.sendInvitation(
         userId.toString(),
         receiverEmail,
         new Date(anniversaryDate),
@@ -124,7 +124,7 @@ export class CoupleInvitationController {
     async (req: Request, res: Response): Promise<void> => {
       const userId = req.user!._id;
 
-      const invitations = await this.invitationService.getUserInvitations(
+      const invitations = await this.invitationRepository.getUserInvitations(
         userId.toString()
       );
 
@@ -154,7 +154,7 @@ export class CoupleInvitationController {
     async (req: Request, res: Response): Promise<void> => {
       const userId = req.user!._id;
 
-      const invitations = await this.invitationService.getSentInvitations(
+      const invitations = await this.invitationRepository.getSentInvitations(
         userId.toString()
       );
 
@@ -185,7 +185,7 @@ export class CoupleInvitationController {
       const userId = req.user!._id;
       const { id } = req.params;
 
-      const couple = await this.invitationService.acceptInvitation(
+      const couple = await this.invitationRepository.acceptInvitation(
         id,
         userId.toString()
       );
@@ -218,7 +218,7 @@ export class CoupleInvitationController {
       const userId = req.user!._id;
       const { id } = req.params;
 
-      await this.invitationService.rejectInvitation(id, userId.toString());
+      await this.invitationRepository.rejectInvitation(id, userId.toString());
 
       const response: ApiResponse = {
         success: true,
@@ -238,7 +238,7 @@ export class CoupleInvitationController {
       const userId = req.user!._id;
       const { id } = req.params;
 
-      await this.invitationService.cancelInvitation(id, userId.toString());
+      await this.invitationRepository.cancelInvitation(id, userId.toString());
 
       const response: ApiResponse = {
         success: true,
@@ -258,7 +258,7 @@ export class CoupleInvitationController {
       const { id } = req.params;
       const userId = req.user!._id;
 
-      const invitation = await this.invitationService.getInvitationById(id);
+      const invitation = await this.invitationRepository.getInvitationById(id);
 
       if (!invitation) {
         throw new AppError("Invitation not found", 404);
@@ -301,7 +301,7 @@ export class CoupleInvitationController {
    */
   public getInvitationStats = asyncHandler(
     async (_req: Request, res: Response): Promise<void> => {
-      const stats = await this.invitationService.getInvitationStats();
+      const stats = await this.invitationRepository.getInvitationStats();
 
       const response: ApiResponse = {
         success: true,

@@ -1,53 +1,54 @@
 import { Types } from "mongoose";
 import { Anniversary, IAnniversary } from "../models/Anniversary";
+import { Couple } from "../models/Couple";
 import { AppError } from "../../utils/AppError";
 
 export class AnniversaryRepository {
   /**
    * Create a new anniversary
    */
-  async create(anniversaryData: {
-    coupleId: string;
-    title: string;
-    date: Date;
-    remindBefore?: number;
-    repeatAnnually?: boolean;
-  }): Promise<IAnniversary> {
-    try {
-      const anniversary = new Anniversary({
-        coupleId: new Types.ObjectId(anniversaryData.coupleId),
-        title: anniversaryData.title,
-        date: anniversaryData.date,
-        remindBefore: anniversaryData.remindBefore ?? 1,
-        repeatAnnually: anniversaryData.repeatAnnually ?? false,
-      });
-
-      await anniversary.save();
-      return anniversary;
-    } catch (error) {
-      throw new AppError("Failed to create anniversary", 500);
-    }
-  }
-
-  /**
-   * Find anniversary by ID
-   */
-  async findById(anniversaryId: string): Promise<IAnniversary | null> {
-    try {
-      if (!Types.ObjectId.isValid(anniversaryId)) {
-        return null;
-      }
-      return await Anniversary.findById(anniversaryId);
-    } catch (error) {
-      throw new AppError("Failed to find anniversary", 500);
-    }
-  }
-
-  /**
-   * Find anniversaries by couple ID
-   */
-  async findByCoupleId(
+  public static async createAnniversary(
     coupleId: string,
+    userId: string,
+    anniversaryData: {
+      title: string;
+      date: Date;
+      remindBefore?: number;
+      repeatAnnually?: boolean;
+    }
+  ): Promise<IAnniversary> {
+    // Verify couple exists and user belongs to it
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
+    }
+
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
+    }
+
+    // Create anniversary
+    const anniversary = new Anniversary({
+      coupleId: new Types.ObjectId(coupleId),
+      title: anniversaryData.title,
+      date: anniversaryData.date,
+      remindBefore: anniversaryData.remindBefore ?? 1,
+      repeatAnnually: anniversaryData.repeatAnnually ?? false,
+    });
+
+    await anniversary.save();
+    return anniversary;
+  }
+
+  /**
+   * Get all anniversaries for a couple
+   */
+  public static async getCoupleAnniversaries(
+    coupleId: string,
+    userId: string,
     options: {
       year?: number;
       upcoming?: boolean;
@@ -57,171 +58,232 @@ export class AnniversaryRepository {
   ): Promise<{
     anniversaries: IAnniversary[];
     total: number;
+    upcomingCount?: number;
   }> {
-    try {
-      let query: any = { coupleId: new Types.ObjectId(coupleId) };
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      // Filter by year
-      if (options.year) {
-        const startOfYear = new Date(options.year, 0, 1);
-        const endOfYear = new Date(options.year + 1, 0, 1);
-        query.date = { $gte: startOfYear, $lt: endOfYear };
-      }
+    let query: any = { coupleId: new Types.ObjectId(coupleId) };
 
-      // Filter upcoming anniversaries
-      if (options.upcoming) {
-        const now = new Date();
-        const nextYear = new Date(
-          now.getFullYear() + 1,
-          now.getMonth(),
-          now.getDate()
-        );
-        query.date = { $gte: now, $lte: nextYear };
-      }
-
-      const total = await Anniversary.countDocuments(query);
-
-      let anniversariesQuery = Anniversary.find(query).sort({ date: 1 });
-
-      if (options.limit) {
-        anniversariesQuery = anniversariesQuery.limit(options.limit);
-      }
-
-      if (options.offset) {
-        anniversariesQuery = anniversariesQuery.skip(options.offset);
-      }
-
-      const anniversaries = await anniversariesQuery.exec();
-
-      return { anniversaries, total };
-    } catch (error) {
-      throw new AppError("Failed to find anniversaries by couple", 500);
+    // Filter by year
+    if (options.year) {
+      const startOfYear = new Date(options.year, 0, 1);
+      const endOfYear = new Date(options.year + 1, 0, 1);
+      query.date = { $gte: startOfYear, $lt: endOfYear };
     }
+
+    // Filter upcoming anniversaries
+    if (options.upcoming) {
+      const now = new Date();
+      const nextYear = new Date(
+        now.getFullYear() + 1,
+        now.getMonth(),
+        now.getDate()
+      );
+      query.date = { $gte: now, $lte: nextYear };
+    }
+
+    const total = await Anniversary.countDocuments(query);
+
+    let anniversariesQuery = Anniversary.find(query).sort({ date: 1 });
+
+    if (options.limit) {
+      anniversariesQuery = anniversariesQuery.limit(options.limit);
+    }
+
+    if (options.offset) {
+      anniversariesQuery = anniversariesQuery.skip(options.offset);
+    }
+
+    const anniversaries = await anniversariesQuery.exec();
+
+    const result: any = { anniversaries, total };
+
+    // Get upcoming count if requested
+    if (options.upcoming !== true) {
+      const now = new Date();
+      const nextMonth = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        now.getDate()
+      );
+      const upcomingCount = await Anniversary.countDocuments({
+        coupleId: new Types.ObjectId(coupleId),
+        date: { $gte: now, $lte: nextMonth },
+      });
+      result.upcomingCount = upcomingCount;
+    }
+
+    return result;
+  }
+
+  /**
+   * Get anniversary by ID
+   */
+  public static async getAnniversaryById(
+    anniversaryId: string,
+    userId: string
+  ): Promise<IAnniversary> {
+    const anniversary = await Anniversary.findById(anniversaryId);
+    if (!anniversary) {
+      throw new AppError("Anniversary not found", 404);
+    }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(anniversary.coupleId.toString(), userId);
+
+    return anniversary;
   }
 
   /**
    * Update anniversary
    */
-  async update(
+  public static async updateAnniversary(
     anniversaryId: string,
+    userId: string,
     updateData: {
       title?: string;
       date?: Date;
       remindBefore?: number;
       repeatAnnually?: boolean;
     }
-  ): Promise<IAnniversary | null> {
-    try {
-      return await Anniversary.findByIdAndUpdate(
-        anniversaryId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      );
-    } catch (error) {
-      throw new AppError("Failed to update anniversary", 500);
+  ): Promise<IAnniversary> {
+    const anniversary = await Anniversary.findById(anniversaryId);
+    if (!anniversary) {
+      throw new AppError("Anniversary not found", 404);
     }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(anniversary.coupleId.toString(), userId);
+
+    // Update fields
+    if (updateData.title !== undefined) anniversary.title = updateData.title;
+    if (updateData.date !== undefined) anniversary.date = updateData.date;
+    if (updateData.remindBefore !== undefined)
+      anniversary.remindBefore = updateData.remindBefore;
+    if (updateData.repeatAnnually !== undefined)
+      anniversary.repeatAnnually = updateData.repeatAnnually;
+
+    await anniversary.save();
+    return anniversary;
   }
 
   /**
    * Delete anniversary
    */
-  async delete(anniversaryId: string): Promise<boolean> {
-    try {
-      const result = await Anniversary.findByIdAndDelete(anniversaryId);
-      return !!result;
-    } catch (error) {
-      throw new AppError("Failed to delete anniversary", 500);
+  public static async deleteAnniversary(
+    anniversaryId: string,
+    userId: string
+  ): Promise<void> {
+    const anniversary = await Anniversary.findById(anniversaryId);
+    if (!anniversary) {
+      throw new AppError("Anniversary not found", 404);
     }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(anniversary.coupleId.toString(), userId);
+
+    await Anniversary.findByIdAndDelete(anniversaryId);
   }
 
   /**
-   * Find upcoming anniversaries
+   * Get upcoming anniversaries (within next 30 days)
    */
-  async findUpcoming(
+  public static async getUpcomingAnniversaries(
     coupleId: string,
+    userId: string,
     days: number = 30
   ): Promise<IAnniversary[]> {
-    try {
-      const now = new Date();
-      const futureDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      return await Anniversary.find({
-        coupleId: new Types.ObjectId(coupleId),
-        date: { $gte: now, $lte: futureDate },
-      }).sort({ date: 1 });
-    } catch (error) {
-      throw new AppError("Failed to find upcoming anniversaries", 500);
-    }
+    const now = new Date();
+    const futureDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+    const anniversaries = await Anniversary.find({
+      coupleId: new Types.ObjectId(coupleId),
+      date: { $gte: now, $lte: futureDate },
+    }).sort({ date: 1 });
+
+    return anniversaries;
   }
 
   /**
-   * Find anniversaries by date range
+   * Get anniversaries by date range
    */
-  async findByDateRange(
+  public static async getAnniversariesByDateRange(
     coupleId: string,
+    userId: string,
     startDate: Date,
     endDate: Date
   ): Promise<IAnniversary[]> {
-    try {
-      return await Anniversary.find({
-        coupleId: new Types.ObjectId(coupleId),
-        date: { $gte: startDate, $lte: endDate },
-      }).sort({ date: 1 });
-    } catch (error) {
-      throw new AppError("Failed to find anniversaries by date range", 500);
-    }
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
+
+    const anniversaries = await Anniversary.find({
+      coupleId: new Types.ObjectId(coupleId),
+      date: { $gte: startDate, $lte: endDate },
+    }).sort({ date: 1 });
+
+    return anniversaries;
   }
 
   /**
    * Get anniversary statistics
    */
-  async getStatistics(coupleId: string): Promise<{
+  public static async getAnniversaryStats(
+    coupleId: string,
+    userId: string
+  ): Promise<{
     total: number;
     upcoming: number;
     thisMonth: number;
     repeating: number;
   }> {
-    try {
-      const coupleObjectId = new Types.ObjectId(coupleId);
-      const now = new Date();
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      const next30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      const [total, upcoming, thisMonth, repeating] = await Promise.all([
-        Anniversary.countDocuments({ coupleId: coupleObjectId }),
-        Anniversary.countDocuments({
-          coupleId: coupleObjectId,
-          date: { $gte: now, $lte: next30Days },
-        }),
-        Anniversary.countDocuments({
-          coupleId: coupleObjectId,
-          date: { $gte: now, $lte: endOfMonth },
-        }),
-        Anniversary.countDocuments({
-          coupleId: coupleObjectId,
-          repeatAnnually: true,
-        }),
-      ]);
+    const coupleObjectId = new Types.ObjectId(coupleId);
+    const now = new Date();
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const next30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-      return { total, upcoming, thisMonth, repeating };
-    } catch (error) {
-      throw new AppError("Failed to get anniversary statistics", 500);
-    }
+    const [total, upcoming, thisMonth, repeating] = await Promise.all([
+      Anniversary.countDocuments({ coupleId: coupleObjectId }),
+      Anniversary.countDocuments({
+        coupleId: coupleObjectId,
+        date: { $gte: now, $lte: next30Days },
+      }),
+      Anniversary.countDocuments({
+        coupleId: coupleObjectId,
+        date: { $gte: now, $lte: endOfMonth },
+      }),
+      Anniversary.countDocuments({
+        coupleId: coupleObjectId,
+        repeatAnnually: true,
+      }),
+    ]);
+
+    return { total, upcoming, thisMonth, repeating };
   }
 
   /**
-   * Check if anniversary exists
+   * Helper method to verify couple access
    */
-  async exists(anniversaryId: string): Promise<boolean> {
-    try {
-      if (!Types.ObjectId.isValid(anniversaryId)) {
-        return false;
-      }
-      const anniversary =
-        await Anniversary.findById(anniversaryId).select("_id");
-      return !!anniversary;
-    } catch (error) {
-      return false;
+  private static async verifyCoupleAccess(
+    coupleId: string,
+    userId: string
+  ): Promise<void> {
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
+    }
+
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
     }
   }
 }

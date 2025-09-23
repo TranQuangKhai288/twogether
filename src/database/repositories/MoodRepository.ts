@@ -1,471 +1,472 @@
 import { Types } from "mongoose";
 import { Mood, IMood } from "../models/Mood";
+import { Couple } from "../models/Couple";
 import { AppError } from "../../utils/AppError";
 
 export class MoodRepository {
   /**
    * Create a new mood entry
    */
-  async create(moodData: {
-    coupleId: string;
-    userId: string;
-    mood: "very-happy" | "happy" | "neutral" | "sad" | "very-sad";
-    note?: string;
-  }): Promise<IMood> {
-    try {
-      const mood = new Mood({
-        coupleId: new Types.ObjectId(moodData.coupleId),
-        userId: new Types.ObjectId(moodData.userId),
-        mood: moodData.mood,
-        note: moodData.note,
-      });
-
-      await mood.save();
-      return mood.populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to create mood entry", 500);
-    }
-  }
-
-  /**
-   * Find mood by ID
-   */
-  async findById(moodId: string): Promise<IMood | null> {
-    try {
-      if (!Types.ObjectId.isValid(moodId)) {
-        return null;
-      }
-      return await Mood.findById(moodId).populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to find mood entry", 500);
-    }
-  }
-
-  /**
-   * Find moods by couple ID
-   */
-  async findByCoupleId(
+  public static async createMood(
     coupleId: string,
+    userId: string,
+    moodData: {
+      mood: string;
+      note?: string;
+    }
+  ): Promise<IMood> {
+    // Verify couple exists and user belongs to it
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
+    }
+
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
+    }
+
+    // Create mood
+    const mood = new Mood({
+      coupleId: new Types.ObjectId(coupleId),
+      userId: new Types.ObjectId(userId),
+      mood: moodData.mood,
+      note: moodData.note,
+    });
+
+    await mood.save();
+    return mood.populate("userId", "name email avatarUrl");
+  }
+
+  /**
+   * Get latest mood for a user
+   */
+  public static async getLatestMoodForUser(
+    coupleId: string,
+    targetUserId: string,
+    requestUserId: string
+  ): Promise<IMood | null> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, requestUserId);
+
+    const mood = await (Mood as any).getLatestMoodForUser(
+      new Types.ObjectId(coupleId),
+      new Types.ObjectId(targetUserId)
+    );
+
+    if (mood) {
+      await mood.populate("userId", "name email avatarUrl");
+    }
+
+    return mood;
+  }
+
+  /**
+   * Get mood history for couple
+   */
+  public static async getMoodHistory(
+    coupleId: string,
+    userId: string,
     options: {
-      userId?: string;
-      mood?: "very-happy" | "happy" | "neutral" | "sad" | "very-sad";
-      startDate?: Date;
-      endDate?: Date;
       limit?: number;
       offset?: number;
-      sortBy?: "newest" | "oldest";
+      startDate?: Date;
+      endDate?: Date;
+      targetUserId?: string;
     } = {}
   ): Promise<{
     moods: IMood[];
     total: number;
   }> {
-    try {
-      let query: any = { coupleId: new Types.ObjectId(coupleId) };
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      if (options.userId) {
-        query.userId = new Types.ObjectId(options.userId);
-      }
+    let query: any = { coupleId: new Types.ObjectId(coupleId) };
 
-      if (options.mood) {
-        query.mood = options.mood;
-      }
-
-      if (options.startDate || options.endDate) {
-        query.createdAt = {};
-        if (options.startDate) {
-          query.createdAt.$gte = options.startDate;
-        }
-        if (options.endDate) {
-          query.createdAt.$lte = options.endDate;
-        }
-      }
-
-      const total = await Mood.countDocuments(query);
-
-      let moodsQuery = Mood.find(query).populate("userId", "name email");
-
-      const sortOrder = options.sortBy === "oldest" ? 1 : -1;
-      moodsQuery = moodsQuery.sort({ createdAt: sortOrder });
-
-      if (options.limit) {
-        moodsQuery = moodsQuery.limit(options.limit);
-      }
-
-      if (options.offset) {
-        moodsQuery = moodsQuery.skip(options.offset);
-      }
-
-      const moods = await moodsQuery.exec();
-
-      return { moods, total };
-    } catch (error) {
-      throw new AppError("Failed to find moods by couple", 500);
+    // Filter by target user
+    if (options.targetUserId) {
+      query.userId = new Types.ObjectId(options.targetUserId);
     }
+
+    // Filter by date range
+    if (options.startDate || options.endDate) {
+      query.createdAt = {};
+      if (options.startDate) query.createdAt.$gte = options.startDate;
+      if (options.endDate) query.createdAt.$lte = options.endDate;
+    }
+
+    const total = await Mood.countDocuments(query);
+
+    let moodsQuery = Mood.find(query)
+      .populate("userId", "name email avatarUrl")
+      .sort({ createdAt: -1 });
+
+    if (options.limit) {
+      moodsQuery = moodsQuery.limit(options.limit);
+    }
+
+    if (options.offset) {
+      moodsQuery = moodsQuery.skip(options.offset);
+    }
+
+    const moods = await moodsQuery.exec();
+
+    return { moods, total };
   }
 
   /**
-   * Update mood entry
+   * Get mood by ID
    */
-  async update(
+  public static async getMoodById(
     moodId: string,
+    userId: string
+  ): Promise<IMood> {
+    const mood = await Mood.findById(moodId).populate(
+      "userId",
+      "name email avatarUrl"
+    );
+    if (!mood) {
+      throw new AppError("Mood not found", 404);
+    }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(mood.coupleId.toString(), userId);
+
+    return mood;
+  }
+
+  /**
+   * Update mood (only by the creator)
+   */
+  public static async updateMood(
+    moodId: string,
+    userId: string,
     updateData: {
-      mood?: "very-happy" | "happy" | "neutral" | "sad" | "very-sad";
+      mood?: string;
       note?: string;
     }
-  ): Promise<IMood | null> {
-    try {
-      return await Mood.findByIdAndUpdate(
-        moodId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      ).populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to update mood entry", 500);
+  ): Promise<IMood> {
+    const mood = await Mood.findById(moodId);
+    if (!mood) {
+      throw new AppError("Mood not found", 404);
     }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(mood.coupleId.toString(), userId);
+
+    // Only the creator can update their mood
+    if (mood.userId.toString() !== userId) {
+      throw new AppError("You can only update your own mood entries", 403);
+    }
+
+    // Update fields
+    if (updateData.mood !== undefined) mood.mood = updateData.mood;
+    if (updateData.note !== undefined) mood.note = updateData.note;
+
+    await mood.save();
+    return mood.populate("userId", "name email avatarUrl");
   }
 
   /**
-   * Delete mood entry
+   * Delete mood (only by the creator)
    */
-  async delete(moodId: string): Promise<boolean> {
-    try {
-      const result = await Mood.findByIdAndDelete(moodId);
-      return !!result;
-    } catch (error) {
-      throw new AppError("Failed to delete mood entry", 500);
+  public static async deleteMood(
+    moodId: string,
+    userId: string
+  ): Promise<void> {
+    const mood = await Mood.findById(moodId);
+    if (!mood) {
+      throw new AppError("Mood not found", 404);
     }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(mood.coupleId.toString(), userId);
+
+    // Only the creator can delete their mood
+    if (mood.userId.toString() !== userId) {
+      throw new AppError("You can only delete your own mood entries", 403);
+    }
+
+    await Mood.findByIdAndDelete(moodId);
   }
 
   /**
-   * Get today's mood for a user
+   * Get mood statistics for couple
    */
-  async getTodayMood(coupleId: string, userId: string): Promise<IMood | null> {
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-
-      return await Mood.findOne({
-        coupleId: new Types.ObjectId(coupleId),
-        userId: new Types.ObjectId(userId),
-        createdAt: {
-          $gte: today,
-          $lt: tomorrow,
-        },
-      }).populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to get today's mood", 500);
-    }
-  }
-
-  /**
-   * Get mood trends for a period
-   */
-  async getMoodTrends(
+  public static async getMoodStats(
     coupleId: string,
+    userId: string,
     options: {
-      userId?: string;
-      days?: number; // Default 30 days
       startDate?: Date;
       endDate?: Date;
-    } = {}
-  ): Promise<{
-    trends: {
-      date: string;
-      "very-happy": number;
-      happy: number;
-      neutral: number;
-      sad: number;
-      "very-sad": number;
-      total: number;
-    }[];
-    averageMood: number;
-  }> {
-    try {
-      let startDate = options.startDate;
-      let endDate = options.endDate;
-
-      if (!startDate || !endDate) {
-        const days = options.days || 30;
-        endDate = endDate || new Date();
-        startDate =
-          startDate || new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000);
-      }
-
-      let matchQuery: any = {
-        coupleId: new Types.ObjectId(coupleId),
-        createdAt: { $gte: startDate, $lte: endDate },
-      };
-
-      if (options.userId) {
-        matchQuery.userId = new Types.ObjectId(options.userId);
-      }
-
-      const trends = await Mood.aggregate([
-        { $match: matchQuery },
-        {
-          $group: {
-            _id: {
-              date: {
-                $dateToString: {
-                  format: "%Y-%m-%d",
-                  date: "$createdAt",
-                },
-              },
-              mood: "$mood",
-            },
-            count: { $sum: 1 },
-          },
-        },
-        {
-          $group: {
-            _id: "$_id.date",
-            moods: {
-              $push: {
-                mood: "$_id.mood",
-                count: "$count",
-              },
-            },
-            total: { $sum: "$count" },
-          },
-        },
-        { $sort: { _id: 1 } },
-      ]);
-
-      const formattedTrends = trends.map((trend: any) => {
-        const moodCounts = {
-          "very-happy": 0,
-          happy: 0,
-          neutral: 0,
-          sad: 0,
-          "very-sad": 0,
-        };
-
-        trend.moods.forEach((mood: any) => {
-          moodCounts[mood.mood as keyof typeof moodCounts] = mood.count;
-        });
-
-        return {
-          date: trend._id,
-          ...moodCounts,
-          total: trend.total,
-        };
-      });
-
-      // Calculate average mood (1=very-sad, 5=very-happy)
-      const moodValues = {
-        "very-sad": 1,
-        sad: 2,
-        neutral: 3,
-        happy: 4,
-        "very-happy": 5,
-      };
-      let totalMoodValue = 0;
-      let totalEntries = 0;
-
-      formattedTrends.forEach((trend) => {
-        Object.entries(moodValues).forEach(([mood, value]) => {
-          const count = trend[mood as keyof typeof trend] as number;
-          totalMoodValue += count * value;
-          totalEntries += count;
-        });
-      });
-
-      const averageMood = totalEntries > 0 ? totalMoodValue / totalEntries : 0;
-
-      return { trends: formattedTrends, averageMood };
-    } catch (error) {
-      throw new AppError("Failed to get mood trends", 500);
-    }
-  }
-
-  /**
-   * Get mood statistics
-   */
-  async getStatistics(
-    coupleId: string,
-    options: {
-      userId?: string;
-      days?: number;
+      targetUserId?: string;
     } = {}
   ): Promise<{
     total: number;
+    byUser: { [userId: string]: number };
+    byMood: { [mood: string]: number };
     thisWeek: number;
-    averageMood: number;
-    moodDistribution: {
-      "very-happy": number;
-      happy: number;
-      neutral: number;
-      sad: number;
-      "very-sad": number;
-    };
-    streak: number; // Current consecutive days with mood entries
+    thisMonth: number;
   }> {
-    try {
-      const days = options.days || 30;
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      const startOfWeek = new Date();
-      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-      startOfWeek.setHours(0, 0, 0, 0);
+    const coupleObjectId = new Types.ObjectId(coupleId);
+    let matchQuery: any = { coupleId: coupleObjectId };
 
-      let matchQuery: any = { coupleId: new Types.ObjectId(coupleId) };
-      let recentMatchQuery: any = {
-        coupleId: new Types.ObjectId(coupleId),
-        createdAt: { $gte: startDate },
-      };
-      let weekMatchQuery: any = {
-        coupleId: new Types.ObjectId(coupleId),
-        createdAt: { $gte: startOfWeek },
-      };
+    // Filter by target user
+    if (options.targetUserId) {
+      matchQuery.userId = new Types.ObjectId(options.targetUserId);
+    }
 
-      if (options.userId) {
-        matchQuery.userId = new Types.ObjectId(options.userId);
-        recentMatchQuery.userId = new Types.ObjectId(options.userId);
-        weekMatchQuery.userId = new Types.ObjectId(options.userId);
-      }
+    // Filter by date range
+    if (options.startDate || options.endDate) {
+      matchQuery.createdAt = {};
+      if (options.startDate) matchQuery.createdAt.$gte = options.startDate;
+      if (options.endDate) matchQuery.createdAt.$lte = options.endDate;
+    }
 
-      const [total, thisWeek, moodStats, streakData] = await Promise.all([
-        Mood.countDocuments(recentMatchQuery),
-        Mood.countDocuments(weekMatchQuery),
+    const now = new Date();
+    const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [total, thisWeek, thisMonth, userStats, moodStats] =
+      await Promise.all([
+        Mood.countDocuments(matchQuery),
+        Mood.countDocuments({
+          ...matchQuery,
+          createdAt: { $gte: startOfWeek },
+        }),
+        Mood.countDocuments({
+          ...matchQuery,
+          createdAt: { $gte: startOfMonth },
+        }),
         Mood.aggregate([
-          { $match: recentMatchQuery },
+          { $match: matchQuery },
+          { $group: { _id: "$userId", count: { $sum: 1 } } },
+        ]),
+        Mood.aggregate([
+          { $match: matchQuery },
           { $group: { _id: "$mood", count: { $sum: 1 } } },
         ]),
-        this.calculateStreak(coupleId, options.userId),
       ]);
 
-      const moodDistribution = {
-        "very-happy": 0,
-        happy: 0,
-        neutral: 0,
-        sad: 0,
-        "very-sad": 0,
-      };
+    const byUser: { [userId: string]: number } = {};
+    userStats.forEach((stat: any) => {
+      byUser[stat._id.toString()] = stat.count;
+    });
 
-      let totalMoodValue = 0;
-      moodStats.forEach((stat: any) => {
-        moodDistribution[stat._id as keyof typeof moodDistribution] =
-          stat.count;
-        const moodValues = {
-          "very-sad": 1,
-          sad: 2,
-          neutral: 3,
-          happy: 4,
-          "very-happy": 5,
-        };
-        totalMoodValue +=
-          stat.count * moodValues[stat._id as keyof typeof moodValues];
-      });
+    const byMood: { [mood: string]: number } = {};
+    moodStats.forEach((stat: any) => {
+      byMood[stat._id] = stat.count;
+    });
 
-      const averageMood = total > 0 ? totalMoodValue / total : 0;
-
-      return {
-        total,
-        thisWeek,
-        averageMood,
-        moodDistribution,
-        streak: streakData,
-      };
-    } catch (error) {
-      throw new AppError("Failed to get mood statistics", 500);
-    }
+    return { total, byUser, byMood, thisWeek, thisMonth };
   }
 
   /**
-   * Calculate current streak of consecutive days with mood entries
+   * Get mood trends over time
    */
-  private async calculateStreak(
-    coupleId: string,
-    userId?: string
-  ): Promise<number> {
-    try {
-      let matchQuery: any = { coupleId: new Types.ObjectId(coupleId) };
-      if (userId) {
-        matchQuery.userId = new Types.ObjectId(userId);
-      }
-
-      const recentMoods = await Mood.find(matchQuery)
-        .sort({ createdAt: -1 })
-        .limit(100)
-        .select("createdAt");
-
-      if (recentMoods.length === 0) return 0;
-
-      let streak = 0;
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const moodDates = recentMoods.map((mood) => {
-        const moodObj = mood.toObject();
-        const date = new Date(moodObj.createdAt);
-        date.setHours(0, 0, 0, 0);
-        return date.getTime();
-      });
-
-      const uniqueDates = [...new Set(moodDates)].sort((a, b) => b - a);
-
-      let currentDate = today.getTime();
-      for (const moodDate of uniqueDates) {
-        if (moodDate === currentDate) {
-          streak++;
-          currentDate -= 24 * 60 * 60 * 1000; // Go to previous day
-        } else if (moodDate === currentDate + 24 * 60 * 60 * 1000) {
-          // If we haven't tracked today yet, but tracked yesterday
-          streak++;
-          currentDate = moodDate - 24 * 60 * 60 * 1000;
-        } else {
-          break;
-        }
-      }
-
-      return streak;
-    } catch (error) {
-      return 0;
-    }
-  }
-
-  /**
-   * Check if mood exists
-   */
-  async exists(moodId: string): Promise<boolean> {
-    try {
-      if (!Types.ObjectId.isValid(moodId)) {
-        return false;
-      }
-      const mood = await Mood.findById(moodId).select("_id");
-      return !!mood;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Get mood by user and date
-   */
-  async findByUserAndDate(
+  public static async getMoodTrends(
     coupleId: string,
     userId: string,
-    date: Date
-  ): Promise<IMood | null> {
-    try {
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
+    options: {
+      period: "week" | "month" | "year";
+      targetUserId?: string;
+    }
+  ): Promise<{
+    labels: string[];
+    data: { [mood: string]: number[] };
+  }> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      return await Mood.findOne({
-        coupleId: new Types.ObjectId(coupleId),
-        userId: new Types.ObjectId(userId),
-        createdAt: {
-          $gte: startOfDay,
-          $lte: endOfDay,
+    const now = new Date();
+    let startDate: Date;
+    let groupBy: any;
+    let periods: string[] = [];
+
+    switch (options.period) {
+      case "week":
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        groupBy = {
+          $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+        };
+        // Generate last 7 days
+        for (let i = 6; i >= 0; i--) {
+          const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+          periods.push(date.toISOString().split("T")[0]);
+        }
+        break;
+      case "month":
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        groupBy = {
+          $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+        };
+        // Generate days of current month
+        const daysInMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          0
+        ).getDate();
+        for (let i = 1; i <= daysInMonth; i++) {
+          const date = new Date(now.getFullYear(), now.getMonth(), i);
+          periods.push(date.toISOString().split("T")[0]);
+        }
+        break;
+      case "year":
+        startDate = new Date(now.getFullYear(), 0, 1);
+        groupBy = {
+          $dateToString: { format: "%Y-%m", date: "$createdAt" },
+        };
+        // Generate months of current year
+        for (let i = 0; i < 12; i++) {
+          const date = new Date(now.getFullYear(), i, 1);
+          periods.push(date.toISOString().substring(0, 7));
+        }
+        break;
+    }
+
+    let matchQuery: any = {
+      coupleId: new Types.ObjectId(coupleId),
+      createdAt: { $gte: startDate },
+    };
+
+    if (options.targetUserId) {
+      matchQuery.userId = new Types.ObjectId(options.targetUserId);
+    }
+
+    const trends = await Mood.aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: {
+            period: groupBy,
+            mood: "$mood",
+          },
+          count: { $sum: 1 },
         },
-      }).populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to find mood by user and date", 500);
+      },
+      {
+        $group: {
+          _id: "$_id.period",
+          moods: {
+            $push: {
+              mood: "$_id.mood",
+              count: "$count",
+            },
+          },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    // Process data for chart
+    const data: { [mood: string]: number[] } = {};
+    const moodSet = new Set<string>();
+
+    // Collect all unique moods
+    trends.forEach((trend: any) => {
+      trend.moods.forEach((moodData: any) => {
+        moodSet.add(moodData.mood);
+      });
+    });
+
+    // Initialize data structure
+    moodSet.forEach((mood) => {
+      data[mood] = new Array(periods.length).fill(0);
+    });
+
+    // Fill in actual data
+    trends.forEach((trend: any) => {
+      const periodIndex = periods.indexOf(trend._id);
+      if (periodIndex !== -1) {
+        trend.moods.forEach((moodData: any) => {
+          data[moodData.mood][periodIndex] = moodData.count;
+        });
+      }
+    });
+
+    return { labels: periods, data };
+  }
+
+  /**
+   * Get current mood status for both users in couple
+   */
+  public static async getCurrentMoodStatus(
+    coupleId: string,
+    userId: string
+  ): Promise<{
+    [userId: string]: {
+      latestMood: IMood | null;
+      todayMoodCount: number;
+    };
+  }> {
+    // Verify user belongs to couple
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
+    }
+
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const result: any = {};
+
+    for (const coupleUserId of couple.users) {
+      const [latestMood, todayMoodCount] = await Promise.all([
+        (Mood as any).getLatestMoodForUser(
+          new Types.ObjectId(coupleId),
+          coupleUserId
+        ),
+        Mood.countDocuments({
+          coupleId: new Types.ObjectId(coupleId),
+          userId: coupleUserId,
+          createdAt: { $gte: today, $lt: tomorrow },
+        }),
+      ]);
+
+      if (latestMood) {
+        await latestMood.populate("userId", "name email avatarUrl");
+      }
+
+      result[coupleUserId.toString()] = {
+        latestMood,
+        todayMoodCount,
+      };
+    }
+
+    return result;
+  }
+
+  /**
+   * Helper method to verify couple access
+   */
+  private static async verifyCoupleAccess(
+    coupleId: string,
+    userId: string
+  ): Promise<void> {
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
+    }
+
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
     }
   }
 }

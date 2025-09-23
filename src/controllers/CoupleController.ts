@@ -1,14 +1,14 @@
 import { Request, Response } from "express";
 import { ApiResponse, PaginatedResponse } from "../types/index.js";
 import { AppError } from "../utils/AppError.js";
-import { CoupleService } from "../database/services/CoupleService.js";
+import { CoupleRepository } from "../database/repositories/CoupleRepository.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 export class CoupleController {
-  private coupleService: CoupleService;
+  private coupleRepository: CoupleRepository;
 
   constructor() {
-    this.coupleService = new CoupleService();
+    this.coupleRepository = new CoupleRepository();
   }
 
   /**
@@ -23,7 +23,7 @@ export class CoupleController {
         throw new AppError("Invite code is required", 400);
       }
 
-      const couple = await this.coupleService.joinCoupleByInviteCode(
+      const couple = await this.coupleRepository.joinCoupleByInviteCode(
         userId.toString(),
         inviteCode
       );
@@ -54,7 +54,7 @@ export class CoupleController {
     async (req: Request, res: Response): Promise<void> => {
       const userId = req.user!._id;
 
-      const couple = await this.coupleService.getCoupleByUserId(
+      const couple = await this.coupleRepository.getCoupleByUserId(
         userId.toString()
       );
 
@@ -89,7 +89,7 @@ export class CoupleController {
       const { id } = req.params;
       const userId = req.user!._id;
 
-      const couple = await this.coupleService.getCoupleById(id);
+      const couple = await this.coupleRepository.getCoupleById(id);
 
       if (!couple) {
         throw new AppError("Couple not found", 404);
@@ -136,14 +136,14 @@ export class CoupleController {
       }
 
       // Get user's couple first
-      const couple = await this.coupleService.getCoupleByUserId(
+      const couple = await this.coupleRepository.getCoupleByUserId(
         userId.toString()
       );
       if (!couple) {
         throw new AppError("You are not in a couple", 404);
       }
 
-      const updatedCouple = await this.coupleService.updateCoupleSettings(
+      const updatedCouple = await this.coupleRepository.updateCoupleSettings(
         couple._id.toString(),
         settings
       );
@@ -176,14 +176,14 @@ export class CoupleController {
       }
 
       // Get user's couple first
-      const couple = await this.coupleService.getCoupleByUserId(
+      const couple = await this.coupleRepository.getCoupleByUserId(
         userId.toString()
       );
       if (!couple) {
         throw new AppError("You are not in a couple", 404);
       }
 
-      const updatedCouple = await this.coupleService.updateAnniversaryDate(
+      const updatedCouple = await this.coupleRepository.updateAnniversaryDate(
         couple._id.toString(),
         new Date(anniversaryDate)
       );
@@ -211,14 +211,14 @@ export class CoupleController {
       const userId = req.user!._id;
 
       // Get user's couple first
-      const couple = await this.coupleService.getCoupleByUserId(
+      const couple = await this.coupleRepository.getCoupleByUserId(
         userId.toString()
       );
       if (!couple) {
         throw new AppError("You are not in a couple", 404);
       }
 
-      const newInviteCode = await this.coupleService.generateNewInviteCode(
+      const newInviteCode = await this.coupleRepository.generateNewInviteCode(
         couple._id.toString()
       );
 
@@ -243,14 +243,14 @@ export class CoupleController {
       const userId = req.user!._id;
 
       // Get user's couple first to verify they are in one
-      const couple = await this.coupleService.getCoupleByUserId(
+      const couple = await this.coupleRepository.getCoupleByUserId(
         userId.toString()
       );
       if (!couple) {
         throw new AppError("You are not in a couple", 404);
       }
 
-      await this.coupleService.removeUserFromCouple(
+      await this.coupleRepository.removeUserFromCouple(
         couple._id.toString(),
         userId.toString()
       );
@@ -273,14 +273,14 @@ export class CoupleController {
       const userId = req.user!._id;
 
       // Get user's couple first
-      const couple = await this.coupleService.getCoupleByUserId(
+      const couple = await this.coupleRepository.getCoupleByUserId(
         userId.toString()
       );
       if (!couple) {
         throw new AppError("You are not in a couple", 404);
       }
 
-      const partner = await this.coupleService.getPartner(
+      const partner = await this.coupleRepository.getPartner(
         couple._id.toString(),
         userId.toString()
       );
@@ -316,7 +316,7 @@ export class CoupleController {
       const userId = req.user!._id;
 
       // Get user's couple first
-      const couple = await this.coupleService.getCoupleByUserId(
+      const couple = await this.coupleRepository.getCoupleByUserId(
         userId.toString()
       );
       if (!couple) {
@@ -358,7 +358,7 @@ export class CoupleController {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 10;
 
-      const result = await this.coupleService.getCouples(page, limit);
+      const result = await this.coupleRepository.getCouples(page, limit);
 
       const response: PaginatedResponse<any> = {
         success: true,
@@ -396,7 +396,7 @@ export class CoupleController {
       const userId = req.user!._id;
 
       // Check if couple exists and user has permission
-      const couple = await this.coupleService.getCoupleById(id);
+      const couple = await this.coupleRepository.getCoupleById(id);
       if (!couple) {
         throw new AppError("Couple not found", 404);
       }
@@ -410,7 +410,7 @@ export class CoupleController {
         throw new AppError("You are not authorized to delete this couple", 403);
       }
 
-      await this.coupleService.deleteCouple(id);
+      await this.coupleRepository.deleteCouple(id);
 
       const response: ApiResponse = {
         success: true,

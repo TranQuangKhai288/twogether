@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { ApiResponse } from "../types/index";
 import { AppError } from "../utils/AppError";
-import { PhotoService } from "../database/services/PhotoService";
+import { PhotoRepository } from "../database/repositories/PhotoRepository";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export class PhotoController {
@@ -17,7 +17,7 @@ export class PhotoController {
         throw new AppError("Couple ID and photo URL are required", 400);
       }
 
-      const photo = await PhotoService.uploadPhoto(coupleId, uploaderId, {
+      const photo = await PhotoRepository.uploadPhoto(coupleId, uploaderId, {
         url,
         caption,
         isFavorite,
@@ -59,7 +59,7 @@ export class PhotoController {
         sortBy: (sortBy as "newest" | "oldest") || "newest",
       };
 
-      const result = await PhotoService.getCouplePhotos(
+      const result = await PhotoRepository.getCouplePhotos(
         coupleId,
         userId,
         options
@@ -96,7 +96,7 @@ export class PhotoController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      const photo = await PhotoService.getPhotoById(id, userId);
+      const photo = await PhotoRepository.getPhotoById(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -130,7 +130,7 @@ export class PhotoController {
       if (caption !== undefined) updateData.caption = caption;
       if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
 
-      const photo = await PhotoService.updatePhoto(id, userId, updateData);
+      const photo = await PhotoRepository.updatePhoto(id, userId, updateData);
 
       const response: ApiResponse = {
         success: true,
@@ -159,7 +159,7 @@ export class PhotoController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      await PhotoService.deletePhoto(id, userId);
+      await PhotoRepository.deletePhoto(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -180,7 +180,7 @@ export class PhotoController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      const photo = await PhotoService.toggleFavorite(id, userId);
+      const photo = await PhotoRepository.toggleFavorite(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -215,7 +215,7 @@ export class PhotoController {
         offset: offset ? parseInt(offset as string) : undefined,
       };
 
-      const result = await PhotoService.getFavoritePhotos(
+      const result = await PhotoRepository.getFavoritePhotos(
         coupleId,
         userId,
         options
@@ -257,7 +257,7 @@ export class PhotoController {
         offset: offset ? parseInt(offset as string) : undefined,
       };
 
-      const result = await PhotoService.getPhotosByUploader(
+      const result = await PhotoRepository.getPhotosByUploader(
         coupleId,
         uploaderId,
         userId,
@@ -294,7 +294,7 @@ export class PhotoController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      const stats = await PhotoService.getPhotoStats(coupleId, userId);
+      const stats = await PhotoRepository.getPhotoStats(coupleId, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -325,7 +325,7 @@ export class PhotoController {
         offset: offset ? parseInt(offset as string) : undefined,
       };
 
-      const result = await PhotoService.searchPhotos(
+      const result = await PhotoRepository.searchPhotos(
         coupleId,
         userId,
         searchTerm as string,

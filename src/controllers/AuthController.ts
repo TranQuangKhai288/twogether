@@ -1,30 +1,35 @@
-import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { ApiResponse } from '@/types';
-import { AppError } from '@/middleware/errorHandler';
-import { UserService } from '@/database/services/UserService';
+import { Request, Response, NextFunction } from "express";
+import jwt from "jsonwebtoken";
+import { ApiResponse } from "@/types";
+import { AppError } from "@/middleware/errorHandler";
+import { UserRepository } from "@/database/repositories/UserRepository";
 
 export class AuthController {
-  private userService = new UserService();
+  private userRepository = new UserRepository();
 
   /**
    * Generate JWT token
    */
   private generateToken(userId: string): string {
-    const secret = process.env.JWT_SECRET || 'fallback-secret-key';
-    
-    return jwt.sign({ userId }, secret, { expiresIn: '7d' });
+    const secret = process.env.JWT_SECRET || "fallback-secret-key";
+
+    return jwt.sign({ userId }, secret, { expiresIn: "7d" });
   }
   /**
    * Register a new user
    */
-  public register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public register = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
-      const { email, password, firstName, lastName, gender, birthday } = req.body;
+      const { email, password, firstName, lastName, gender, birthday } =
+        req.body;
 
       // Validation
       if (!email || !password || !firstName || !lastName || !gender) {
-        throw new AppError('All required fields must be provided', 400);
+        throw new AppError("All required fields must be provided", 400);
       }
 
       // Create user data
@@ -32,7 +37,7 @@ export class AuthController {
         email: string;
         password: string;
         name: string;
-        gender: 'male' | 'female' | 'other';
+        gender: "male" | "female" | "other";
         birthday?: Date;
       } = {
         email,
@@ -46,14 +51,14 @@ export class AuthController {
       }
 
       // Create user
-      const user = await this.userService.createUser(userData);
+      const user = await this.userRepository.createUser(userData);
 
       // Generate JWT token
       const token = this.generateToken(user._id.toString());
 
       const response: ApiResponse = {
         success: true,
-        message: 'User registered successfully',
+        message: "User registered successfully",
         data: {
           user: {
             id: user._id,
@@ -79,24 +84,31 @@ export class AuthController {
   /**
    * Login user
    */
-  public login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public login = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { email, password } = req.body;
 
       if (!email || !password) {
-        throw new AppError('Email and password are required', 400);
+        throw new AppError("Email and password are required", 400);
       }
 
       // Find user by email
-      const user = await this.userService.findByEmail(email);
+      const user = await this.userRepository.findByEmail(email);
       if (!user) {
-        throw new AppError('Invalid email or password', 401);
+        throw new AppError("Invalid email or password", 401);
       }
 
       // Verify password
-      const isValidPassword = await this.userService.verifyPassword(user, password);
+      const isValidPassword = await this.userRepository.verifyPassword(
+        user,
+        password
+      );
       if (!isValidPassword) {
-        throw new AppError('Invalid email or password', 401);
+        throw new AppError("Invalid email or password", 401);
       }
 
       // Generate token
@@ -104,7 +116,7 @@ export class AuthController {
 
       const response: ApiResponse = {
         success: true,
-        message: 'Login successful',
+        message: "Login successful",
         data: {
           user: {
             id: user._id,
@@ -131,13 +143,17 @@ export class AuthController {
   /**
    * Logout user
    */
-  public logout = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public logout = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       // TODO: Implement logout logic (invalidate token)
-      
+
       const response: ApiResponse = {
         success: true,
-        message: 'Logout successful',
+        message: "Logout successful",
         timestamp: new Date().toISOString(),
       };
 
@@ -150,22 +166,26 @@ export class AuthController {
   /**
    * Refresh access token
    */
-  public refresh = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public refresh = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { refreshToken } = req.body;
 
       if (!refreshToken) {
-        throw new AppError('Refresh token is required', 400);
+        throw new AppError("Refresh token is required", 400);
       }
 
       // TODO: Implement token refresh logic
-      
+
       const response: ApiResponse = {
         success: true,
-        message: 'Token refreshed successfully',
+        message: "Token refreshed successfully",
         data: {
-          token: 'new-mock-jwt-token',
-          refreshToken: 'new-mock-refresh-token',
+          token: "new-mock-jwt-token",
+          refreshToken: "new-mock-refresh-token",
         },
         timestamp: new Date().toISOString(),
       };
@@ -179,19 +199,23 @@ export class AuthController {
   /**
    * Send password reset email
    */
-  public forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public forgotPassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { email } = req.body;
 
       if (!email) {
-        throw new AppError('Email is required', 400);
+        throw new AppError("Email is required", 400);
       }
 
       // TODO: Implement forgot password logic
-      
+
       const response: ApiResponse = {
         success: true,
-        message: 'Password reset email sent successfully',
+        message: "Password reset email sent successfully",
         timestamp: new Date().toISOString(),
       };
 
@@ -204,19 +228,23 @@ export class AuthController {
   /**
    * Reset password
    */
-  public resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public resetPassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { token, newPassword } = req.body;
 
       if (!token || !newPassword) {
-        throw new AppError('Token and new password are required', 400);
+        throw new AppError("Token and new password are required", 400);
       }
 
       // TODO: Implement password reset logic
-      
+
       const response: ApiResponse = {
         success: true,
-        message: 'Password reset successfully',
+        message: "Password reset successfully",
         timestamp: new Date().toISOString(),
       };
 

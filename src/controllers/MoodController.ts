@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { ApiResponse } from "../types/index";
 import { AppError } from "../utils/AppError";
-import { MoodService } from "../database/services/MoodService";
+import { MoodRepository } from "../database/repositories/MoodRepository";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export class MoodController {
@@ -17,7 +17,7 @@ export class MoodController {
         throw new AppError("Couple ID and mood are required", 400);
       }
 
-      const moodEntry = await MoodService.createMood(coupleId, userId, {
+      const moodEntry = await MoodRepository.createMood(coupleId, userId, {
         mood,
         note,
       });
@@ -48,7 +48,7 @@ export class MoodController {
       const requestUserId = req.user!._id.toString();
       const { coupleId, userId } = req.params;
 
-      const mood = await MoodService.getLatestMoodForUser(
+      const mood = await MoodRepository.getLatestMoodForUser(
         coupleId,
         userId,
         requestUserId
@@ -91,7 +91,7 @@ export class MoodController {
         targetUserId: targetUserId as string,
       };
 
-      const result = await MoodService.getMoodHistory(
+      const result = await MoodRepository.getMoodHistory(
         coupleId,
         userId,
         options
@@ -126,7 +126,7 @@ export class MoodController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      const mood = await MoodService.getMoodById(id, userId);
+      const mood = await MoodRepository.getMoodById(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -159,7 +159,11 @@ export class MoodController {
       if (mood !== undefined) updateData.mood = mood;
       if (note !== undefined) updateData.note = note;
 
-      const updatedMood = await MoodService.updateMood(id, userId, updateData);
+      const updatedMood = await MoodRepository.updateMood(
+        id,
+        userId,
+        updateData
+      );
 
       const response: ApiResponse = {
         success: true,
@@ -187,7 +191,7 @@ export class MoodController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      await MoodService.deleteMood(id, userId);
+      await MoodRepository.deleteMood(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -215,7 +219,11 @@ export class MoodController {
         targetUserId: targetUserId as string,
       };
 
-      const stats = await MoodService.getMoodStats(coupleId, userId, options);
+      const stats = await MoodRepository.getMoodStats(
+        coupleId,
+        userId,
+        options
+      );
 
       const response: ApiResponse = {
         success: true,
@@ -246,7 +254,11 @@ export class MoodController {
         targetUserId: targetUserId as string,
       };
 
-      const trends = await MoodService.getMoodTrends(coupleId, userId, options);
+      const trends = await MoodRepository.getMoodTrends(
+        coupleId,
+        userId,
+        options
+      );
 
       const response: ApiResponse = {
         success: true,
@@ -274,7 +286,10 @@ export class MoodController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      const status = await MoodService.getCurrentMoodStatus(coupleId, userId);
+      const status = await MoodRepository.getCurrentMoodStatus(
+        coupleId,
+        userId
+      );
 
       // Transform the data to be more user-friendly
       const transformedStatus = Object.entries(status).map(

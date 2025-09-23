@@ -1,8 +1,8 @@
 import bcrypt from "bcryptjs";
 import { Types } from "mongoose";
-import { User, IUser } from "../models/User.js";
-import { Couple } from "../models/Couple.js";
-import { AppError } from "@/utils/AppError.js";
+import { User, IUser } from "../models/User";
+import { Couple } from "../models/Couple";
+import { AppError } from "@/utils/AppError";
 
 export class UserRepository {
   /**
@@ -53,43 +53,35 @@ export class UserRepository {
         "coupleId"
       );
     } catch (error) {
-      throw new AppError("Failed to find user by email", 500);
+      throw new AppError("Failed to find user", 500);
     }
   }
 
   /**
    * Find user by ID
    */
-  async findById(userId: string): Promise<IUser | null> {
+  async findById(userId: string | Types.ObjectId): Promise<IUser | null> {
     try {
-      if (!Types.ObjectId.isValid(userId)) {
-        return null;
-      }
       return await User.findById(userId).populate("coupleId");
     } catch (error) {
-      throw new AppError("Failed to find user by ID", 500);
+      throw new AppError("Failed to find user", 500);
     }
   }
 
   /**
-   * Update user profile
+   * Update user
    */
   async updateUser(
-    userId: string,
-    updateData: {
-      name?: string;
-      gender?: "male" | "female" | "other";
-      birthday?: Date;
-      avatarUrl?: string;
-      bio?: string;
-      isOnline?: boolean;
-      lastSeen?: Date;
-    }
-  ): Promise<IUser> {
+    userId: string | Types.ObjectId,
+    updateData: Partial<IUser>
+  ): Promise<IUser | null> {
     try {
+      // Remove sensitive fields that shouldn't be updated directly
+      const { passwordHash, email, coupleId, ...safeUpdateData } = updateData;
+
       const user = await User.findByIdAndUpdate(
         userId,
-        { $set: updateData },
+        { $set: safeUpdateData },
         { new: true, runValidators: true }
       ).populate("coupleId");
 
@@ -105,34 +97,70 @@ export class UserRepository {
   }
 
   /**
-   * Change user password
+   * Update user preferences
+   */
+  async updatePreferences(
+    userId: string | Types.ObjectId,
+    preferences: { notifications?: boolean; darkMode?: boolean }
+  ): Promise<IUser | null> {
+    try {
+      const user = await User.findByIdAndUpdate(
+        userId,
+        { $set: { preferences } },
+        { new: true, runValidators: true }
+      );
+
+      if (!user) {
+        throw new AppError("User not found", 404);
+      }
+
+      return user;
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("Failed to update preferences", 500);
+    }
+  }
+
+  /**
+   * Verify password
+   */
+  async verifyPassword(user: IUser, password: string): Promise<boolean> {
+    try {
+      return await bcrypt.compare(password, user.passwordHash);
+    } catch (error) {
+      throw new AppError("Failed to verify password", 500);
+    }
+  }
+
+  /**
+   * Change password
    */
   async changePassword(
-    userId: string,
+    userId: string | Types.ObjectId,
     currentPassword: string,
     newPassword: string
-  ): Promise<void> {
+  ): Promise<IUser | null> {
     try {
-      const user = await User.findById(userId).select("+passwordHash");
+      const user = await User.findById(userId);
       if (!user) {
         throw new AppError("User not found", 404);
       }
 
       // Verify current password
-      const isCurrentPasswordValid = await bcrypt.compare(
-        currentPassword,
-        user.passwordHash
-      );
-      if (!isCurrentPasswordValid) {
+      const isValidPassword = await this.verifyPassword(user, currentPassword);
+      if (!isValidPassword) {
         throw new AppError("Current password is incorrect", 400);
       }
 
       // Hash new password
       const saltRounds = 12;
-      const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
+      const passwordHash = await bcrypt.hash(newPassword, saltRounds);
 
       // Update password
-      await User.findByIdAndUpdate(userId, { passwordHash: newPasswordHash });
+      user.passwordHash = passwordHash;
+      await user.save();
+
+      return user;
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new AppError("Failed to change password", 500);
@@ -140,59 +168,87 @@ export class UserRepository {
   }
 
   /**
-   * Verify user password
+   * Set user couple
    */
-  async verifyPassword(email: string, password: string): Promise<IUser | null> {
+  async setUserCouple(
+    userId: string | Types.ObjectId,
+    coupleId: Types.ObjectId
+  ): Promise<IUser | null> {
     try {
-      const user = await User.findOne({ email: email.toLowerCase() }).select(
-        "+passwordHash"
-      );
+      const user = await User.findByIdAndUpdate(
+        userId,
+        { $set: { coupleId } },
+        { new: true, runValidators: true }
+      ).populate("coupleId");
+
       if (!user) {
-        return null;
+        throw new AppError("User not found", 404);
       }
 
-      const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-      if (!isPasswordValid) {
-        return null;
-      }
-
-      // Remove password hash from returned user
-      const userObject = user.toObject();
-      const { passwordHash, __v, ...cleanUser } = userObject;
-      return cleanUser as IUser;
+      return user;
     } catch (error) {
-      throw new AppError("Failed to verify password", 500);
+      if (error instanceof AppError) throw error;
+      throw new AppError("Failed to set user couple", 500);
+    }
+  }
+
+  /**
+   * Remove user from couple
+   */
+  async removeFromCouple(
+    userId: string | Types.ObjectId
+  ): Promise<IUser | null> {
+    try {
+      const user = await User.findByIdAndUpdate(
+        userId,
+        { $unset: { coupleId: "" } },
+        { new: true }
+      );
+
+      if (!user) {
+        throw new AppError("User not found", 404);
+      }
+
+      return user;
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("Failed to remove user from couple", 500);
     }
   }
 
   /**
    * Delete user
    */
-  async deleteUser(userId: string): Promise<void> {
+  async deleteUser(userId: string | Types.ObjectId): Promise<boolean> {
     try {
       const user = await User.findById(userId);
       if (!user) {
         throw new AppError("User not found", 404);
       }
 
-      // If user is in a couple, remove them from the couple
+      // If user is in a couple, handle couple deletion or partner notification
       if (user.coupleId) {
         const couple = await Couple.findById(user.coupleId);
         if (couple) {
-          // Remove user from couple
-          couple.users = couple.users.filter((id) => id.toString() !== userId);
+          // Remove user from couple's users array
+          couple.users = couple.users.filter((id) => !id.equals(user._id));
 
           if (couple.users.length === 0) {
-            // Delete couple if no users left
+            // If no users left, delete the couple
             await Couple.findByIdAndDelete(couple._id);
           } else {
+            // Update the couple
             await couple.save();
+            // Remove coupleId from remaining user
+            await User.findByIdAndUpdate(couple.users[0], {
+              $unset: { coupleId: "" },
+            });
           }
         }
       }
 
-      // Delete user
       await User.findByIdAndDelete(userId);
+      return true;
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new AppError("Failed to delete user", 500);
@@ -200,123 +256,96 @@ export class UserRepository {
   }
 
   /**
-   * Update user online status
+   * Find users with filters and pagination options
    */
-  async updateOnlineStatus(userId: string, isOnline: boolean): Promise<void> {
+  async findUsers(
+    filter: any = {},
+    options: {
+      page?: number;
+      limit?: number;
+      sortBy?: string;
+      sortOrder?: "asc" | "desc";
+    } = {}
+  ): Promise<IUser[]> {
     try {
-      const updateData: any = { isOnline };
-      if (!isOnline) {
-        updateData.lastSeen = new Date();
-      }
+      const {
+        page = 1,
+        limit = 10,
+        sortBy = "createdAt",
+        sortOrder = "desc",
+      } = options;
+      const skip = (page - 1) * limit;
 
-      await User.findByIdAndUpdate(userId, updateData);
+      const sortOptions: any = {};
+      sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+      const users = await User.find(filter)
+        .populate("coupleId")
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limit)
+        .select("-passwordHash"); // Exclude password hash
+
+      return users;
     } catch (error) {
-      throw new AppError("Failed to update online status", 500);
+      throw new AppError("Failed to find users", 500);
     }
   }
 
   /**
-   * Search users by email (for invitations)
+   * Count users with filter
    */
-  async searchByEmail(email: string): Promise<IUser | null> {
+  async countUsers(filter: any = {}): Promise<number> {
     try {
-      return await User.findOne({
-        email: email.toLowerCase(),
-      })
-        .select("-passwordHash")
-        .populate("coupleId");
+      return await User.countDocuments(filter);
     } catch (error) {
-      throw new AppError("Failed to search user by email", 500);
+      throw new AppError("Failed to count users", 500);
     }
   }
 
   /**
-   * Get users by IDs
+   * Get users with pagination
    */
-  async findByIds(userIds: string[]): Promise<IUser[]> {
-    try {
-      const objectIds = userIds
-        .filter((id) => Types.ObjectId.isValid(id))
-        .map((id) => new Types.ObjectId(id));
-
-      return await User.find({
-        _id: { $in: objectIds },
-      })
-        .select("-passwordHash")
-        .populate("coupleId");
-    } catch (error) {
-      throw new AppError("Failed to find users by IDs", 500);
-    }
-  }
-
-  /**
-   * Update user couple association
-   */
-  async updateCoupleId(userId: string, coupleId: string | null): Promise<void> {
-    try {
-      await User.findByIdAndUpdate(userId, {
-        coupleId: coupleId ? new Types.ObjectId(coupleId) : null,
-      });
-    } catch (error) {
-      throw new AppError("Failed to update user couple association", 500);
-    }
-  }
-
-  /**
-   * Get user statistics
-   */
-  async getUserStats(userId: string): Promise<{
-    joinedAt: Date;
-    hasCouple: boolean;
-    totalUsers: number;
-    profileComplete: boolean;
+  async getUsers(
+    page: number = 1,
+    limit: number = 10,
+    searchTerm?: string
+  ): Promise<{
+    users: IUser[];
+    total: number;
+    totalPages: number;
+    currentPage: number;
   }> {
     try {
-      const user = await User.findById(userId);
-      if (!user) {
-        throw new AppError("User not found", 404);
+      const skip = (page - 1) * limit;
+
+      let query = {};
+      if (searchTerm) {
+        query = {
+          $or: [
+            { name: { $regex: searchTerm, $options: "i" } },
+            { email: { $regex: searchTerm, $options: "i" } },
+          ],
+        };
       }
+
+      const [users, total] = await Promise.all([
+        User.find(query)
+          .populate("coupleId")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit),
+        User.countDocuments(query),
+      ]);
 
       return {
-        joinedAt: user.createdAt,
-        hasCouple: !!user.coupleId,
-        totalUsers: await User.countDocuments(),
-        profileComplete: !!(user.name && user.gender && user.birthday),
+        users,
+        total,
+        totalPages: Math.ceil(total / limit),
+        currentPage: page,
       };
     } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to get user statistics", 500);
-    }
-  }
-
-  /**
-   * Check if user exists
-   */
-  async exists(userId: string): Promise<boolean> {
-    try {
-      if (!Types.ObjectId.isValid(userId)) {
-        return false;
-      }
-      const user = await User.findById(userId).select("_id");
-      return !!user;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Find users without couple
-   */
-  async findSingleUsers(limit: number = 10): Promise<IUser[]> {
-    try {
-      return await User.find({
-        coupleId: null,
-      })
-        .select("-passwordHash")
-        .limit(limit)
-        .sort({ createdAt: -1 });
-    } catch (error) {
-      throw new AppError("Failed to find single users", 500);
+      throw new AppError("Failed to get users", 500);
     }
   }
 }

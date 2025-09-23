@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { ApiResponse } from "../types/index";
 import { AppError } from "../utils/AppError";
-import { AnniversaryService } from "../database/services/AnniversaryService";
+import { AnniversaryRepository } from "../database/repositories/AnniversaryRepository";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export class AnniversaryController {
@@ -17,7 +17,7 @@ export class AnniversaryController {
         throw new AppError("Couple ID, title, and date are required", 400);
       }
 
-      const anniversary = await AnniversaryService.createAnniversary(
+      const anniversary = await AnniversaryRepository.createAnniversary(
         coupleId,
         userId,
         {
@@ -64,7 +64,7 @@ export class AnniversaryController {
         offset: offset ? parseInt(offset as string) : undefined,
       };
 
-      const result = await AnniversaryService.getCoupleAnniversaries(
+      const result = await AnniversaryRepository.getCoupleAnniversaries(
         coupleId,
         userId,
         options
@@ -102,7 +102,7 @@ export class AnniversaryController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      const anniversary = await AnniversaryService.getAnniversaryById(
+      const anniversary = await AnniversaryRepository.getAnniversaryById(
         id,
         userId
       );
@@ -143,7 +143,7 @@ export class AnniversaryController {
       if (repeatAnnually !== undefined)
         updateData.repeatAnnually = repeatAnnually;
 
-      const anniversary = await AnniversaryService.updateAnniversary(
+      const anniversary = await AnniversaryRepository.updateAnniversary(
         id,
         userId,
         updateData
@@ -177,7 +177,7 @@ export class AnniversaryController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      await AnniversaryService.deleteAnniversary(id, userId);
+      await AnniversaryRepository.deleteAnniversary(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -201,11 +201,12 @@ export class AnniversaryController {
 
       const daysNumber = days ? parseInt(days as string) : 30;
 
-      const anniversaries = await AnniversaryService.getUpcomingAnniversaries(
-        coupleId,
-        userId,
-        daysNumber
-      );
+      const anniversaries =
+        await AnniversaryRepository.getUpcomingAnniversaries(
+          coupleId,
+          userId,
+          daysNumber
+        );
 
       const response: ApiResponse = {
         success: true,
@@ -241,7 +242,7 @@ export class AnniversaryController {
       }
 
       const anniversaries =
-        await AnniversaryService.getAnniversariesByDateRange(
+        await AnniversaryRepository.getAnniversariesByDateRange(
           coupleId,
           userId,
           new Date(startDate as string),
@@ -276,7 +277,7 @@ export class AnniversaryController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      const stats = await AnniversaryService.getAnniversaryStats(
+      const stats = await AnniversaryRepository.getAnniversaryStats(
         coupleId,
         userId
       );

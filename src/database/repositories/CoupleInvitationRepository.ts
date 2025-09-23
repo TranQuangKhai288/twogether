@@ -2,16 +2,16 @@ import { Types } from "mongoose";
 import {
   CoupleInvitation,
   ICoupleInvitation,
-} from "../models/CoupleInvitation.js";
-import { Couple, ICouple } from "../models/Couple.js";
-import { AppError } from "../../utils/AppError.js";
-import { UserService } from "./UserService.js";
+} from "../models/CoupleInvitation";
+import { Couple, ICouple } from "../models/Couple";
+import { AppError } from "../../utils/AppError";
+import { UserRepository } from "./UserRepository";
 
-export class CoupleInvitationService {
-  private userService: UserService;
+export class CoupleInvitationRepository {
+  private userRepository: UserRepository;
 
   constructor() {
-    this.userService = new UserService();
+    this.userRepository = new UserRepository();
   }
 
   /**
@@ -28,13 +28,13 @@ export class CoupleInvitationService {
       await CoupleInvitation.cleanupExpired();
 
       // Find sender
-      const sender = await this.userService.findById(senderId.toString());
+      const sender = await this.userRepository.findById(senderId.toString());
       if (!sender) {
         throw new AppError("Sender not found", 404);
       }
 
       // Find receiver by email
-      const receiver = await this.userService.findByEmail(receiverEmail);
+      const receiver = await this.userRepository.findByEmail(receiverEmail);
       if (!receiver) {
         throw new AppError("User with this email not found", 404);
       }
@@ -162,10 +162,10 @@ export class CoupleInvitationService {
       }
 
       // Check if either user is already in a couple
-      const sender = await this.userService.findById(
+      const sender = await this.userRepository.findById(
         invitation.sender._id.toString()
       );
-      const receiver = await this.userService.findById(
+      const receiver = await this.userRepository.findById(
         invitation.receiver._id.toString()
       );
 
@@ -199,8 +199,8 @@ export class CoupleInvitationService {
 
       // Update both users' coupleId
       await Promise.all([
-        this.userService.setUserCouple(invitation.sender._id, couple._id),
-        this.userService.setUserCouple(invitation.receiver._id, couple._id),
+        this.userRepository.setUserCouple(invitation.sender._id, couple._id),
+        this.userRepository.setUserCouple(invitation.receiver._id, couple._id),
       ]);
 
       // Update invitation status

@@ -1,452 +1,447 @@
 import { Types } from "mongoose";
 import { LocationShare, ILocationShare } from "../models/LocationShare";
+import { Couple } from "../models/Couple";
 import { AppError } from "../../utils/AppError";
 
 export class LocationShareRepository {
   /**
-   * Create a new location share
+   * Share current location
    */
-  async create(locationData: {
-    coupleId: string;
-    userId: string;
-    lat: number;
-    lng: number;
-    expiresAt: Date;
-  }): Promise<ILocationShare> {
-    try {
-      const location = new LocationShare({
-        coupleId: new Types.ObjectId(locationData.coupleId),
-        userId: new Types.ObjectId(locationData.userId),
-        lat: locationData.lat,
-        lng: locationData.lng,
-        expiresAt: locationData.expiresAt,
-      });
-
-      await location.save();
-      return location.populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to create location share", 500);
-    }
-  }
-
-  /**
-   * Find location by ID
-   */
-  async findById(locationId: string): Promise<ILocationShare | null> {
-    try {
-      if (!Types.ObjectId.isValid(locationId)) {
-        return null;
-      }
-      return await LocationShare.findById(locationId).populate(
-        "userId",
-        "name email"
-      );
-    } catch (error) {
-      throw new AppError("Failed to find location", 500);
-    }
-  }
-
-  /**
-   * Find locations by couple ID
-   */
-  async findByCoupleId(
+  public static async shareLocation(
     coupleId: string,
+    userId: string,
+    locationData: {
+      lat: number;
+      lng: number;
+      duration?: number; // Duration in minutes, default 60
+    }
+  ): Promise<ILocationShare> {
+    // Verify couple exists and user belongs to it
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
+    }
+
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
+    }
+
+    // Validate coordinates
+    if (locationData.lat < -90 || locationData.lat > 90) {
+      throw new AppError("Invalid latitude. Must be between -90 and 90", 400);
+    }
+    if (locationData.lng < -180 || locationData.lng > 180) {
+      throw new AppError(
+        "Invalid longitude. Must be between -180 and 180",
+        400
+      );
+    }
+
+    // Remove any existing active location share for this user
+    await this.stopSharingLocation(coupleId, userId);
+
+    // Calculate expiration time
+    const duration = locationData.duration || 60; // Default 1 hour
+    const expiresAt = new Date(Date.now() + duration * 60 * 1000);
+
+    // Create location share
+    const locationShare = new LocationShare({
+      coupleId: new Types.ObjectId(coupleId),
+      userId: new Types.ObjectId(userId),
+      lat: locationData.lat,
+      lng: locationData.lng,
+      sharedAt: new Date(),
+      expiresAt,
+    });
+
+    await locationShare.save();
+    return locationShare.populate("userId", "name email avatarUrl");
+  }
+
+  /**
+   * Get current shared locations for couple
+   */
+  public static async getCurrentSharedLocations(
+    coupleId: string,
+    userId: string
+  ): Promise<ILocationShare[]> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
+
+    const now = new Date();
+    const locations = await LocationShare.find({
+      coupleId: new Types.ObjectId(coupleId),
+      expiresAt: { $gt: now },
+    })
+      .populate("userId", "name email avatarUrl")
+      .sort({ sharedAt: -1 });
+
+    return locations;
+  }
+
+  /**
+   * Get user's current shared location
+   */
+  public static async getUserCurrentLocation(
+    coupleId: string,
+    targetUserId: string,
+    requestUserId: string
+  ): Promise<ILocationShare | null> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, requestUserId);
+
+    const now = new Date();
+    const location = await LocationShare.findOne({
+      coupleId: new Types.ObjectId(coupleId),
+      userId: new Types.ObjectId(targetUserId),
+      expiresAt: { $gt: now },
+    })
+      .populate("userId", "name email avatarUrl")
+      .sort({ sharedAt: -1 });
+
+    return location;
+  }
+
+  /**
+   * Update shared location
+   */
+  public static async updateLocation(
+    coupleId: string,
+    userId: string,
+    locationData: {
+      lat: number;
+      lng: number;
+      extendDuration?: number; // Additional minutes to extend
+    }
+  ): Promise<ILocationShare> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
+
+    // Validate coordinates
+    if (locationData.lat < -90 || locationData.lat > 90) {
+      throw new AppError("Invalid latitude. Must be between -90 and 90", 400);
+    }
+    if (locationData.lng < -180 || locationData.lng > 180) {
+      throw new AppError(
+        "Invalid longitude. Must be between -180 and 180",
+        400
+      );
+    }
+
+    const now = new Date();
+    const currentLocation = await LocationShare.findOne({
+      coupleId: new Types.ObjectId(coupleId),
+      userId: new Types.ObjectId(userId),
+      expiresAt: { $gt: now },
+    });
+
+    if (!currentLocation) {
+      throw new AppError("No active location sharing found", 404);
+    }
+
+    // Update coordinates
+    currentLocation.lat = locationData.lat;
+    currentLocation.lng = locationData.lng;
+    currentLocation.sharedAt = new Date();
+
+    // Extend duration if requested
+    if (locationData.extendDuration && locationData.extendDuration > 0) {
+      const additionalTime = locationData.extendDuration * 60 * 1000;
+      currentLocation.expiresAt = new Date(
+        currentLocation.expiresAt.getTime() + additionalTime
+      );
+    }
+
+    await currentLocation.save();
+    return currentLocation.populate("userId", "name email avatarUrl");
+  }
+
+  /**
+   * Stop sharing location
+   */
+  public static async stopSharingLocation(
+    coupleId: string,
+    userId: string
+  ): Promise<void> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
+
+    await LocationShare.deleteMany({
+      coupleId: new Types.ObjectId(coupleId),
+      userId: new Types.ObjectId(userId),
+    });
+  }
+
+  /**
+   * Extend location sharing duration
+   */
+  public static async extendLocationSharing(
+    coupleId: string,
+    userId: string,
+    additionalMinutes: number
+  ): Promise<ILocationShare> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
+
+    if (additionalMinutes <= 0 || additionalMinutes > 1440) {
+      // Max 24 hours
+      throw new AppError("Additional minutes must be between 1 and 1440", 400);
+    }
+
+    const now = new Date();
+    const currentLocation = await LocationShare.findOne({
+      coupleId: new Types.ObjectId(coupleId),
+      userId: new Types.ObjectId(userId),
+      expiresAt: { $gt: now },
+    });
+
+    if (!currentLocation) {
+      throw new AppError("No active location sharing found", 404);
+    }
+
+    const additionalTime = additionalMinutes * 60 * 1000;
+    currentLocation.expiresAt = new Date(
+      currentLocation.expiresAt.getTime() + additionalTime
+    );
+
+    await currentLocation.save();
+    return currentLocation.populate("userId", "name email avatarUrl");
+  }
+
+  /**
+   * Get location sharing history
+   */
+  public static async getLocationHistory(
+    coupleId: string,
+    userId: string,
     options: {
-      userId?: string;
-      includeExpired?: boolean;
+      targetUserId?: string;
       startDate?: Date;
       endDate?: Date;
       limit?: number;
       offset?: number;
-      sortBy?: "newest" | "oldest";
     } = {}
   ): Promise<{
     locations: ILocationShare[];
     total: number;
   }> {
-    try {
-      let query: any = { coupleId: new Types.ObjectId(coupleId) };
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      if (options.userId) {
-        query.userId = new Types.ObjectId(options.userId);
-      }
+    let query: any = { coupleId: new Types.ObjectId(coupleId) };
 
-      if (!options.includeExpired) {
-        query.expiresAt = { $gt: new Date() };
-      }
-
-      if (options.startDate || options.endDate) {
-        query.sharedAt = {};
-        if (options.startDate) {
-          query.sharedAt.$gte = options.startDate;
-        }
-        if (options.endDate) {
-          query.sharedAt.$lte = options.endDate;
-        }
-      }
-
-      const total = await LocationShare.countDocuments(query);
-
-      let locationsQuery = LocationShare.find(query).populate(
-        "userId",
-        "name email"
-      );
-
-      const sortOrder = options.sortBy === "oldest" ? 1 : -1;
-      locationsQuery = locationsQuery.sort({ sharedAt: sortOrder });
-
-      if (options.limit) {
-        locationsQuery = locationsQuery.limit(options.limit);
-      }
-
-      if (options.offset) {
-        locationsQuery = locationsQuery.skip(options.offset);
-      }
-
-      const locations = await locationsQuery.exec();
-
-      return { locations, total };
-    } catch (error) {
-      throw new AppError("Failed to find locations by couple", 500);
+    // Filter by target user
+    if (options.targetUserId) {
+      query.userId = new Types.ObjectId(options.targetUserId);
     }
+
+    // Filter by date range
+    if (options.startDate || options.endDate) {
+      query.sharedAt = {};
+      if (options.startDate) query.sharedAt.$gte = options.startDate;
+      if (options.endDate) query.sharedAt.$lte = options.endDate;
+    }
+
+    const total = await LocationShare.countDocuments(query);
+
+    let locationsQuery = LocationShare.find(query)
+      .populate("userId", "name email avatarUrl")
+      .sort({ sharedAt: -1 });
+
+    if (options.limit) {
+      locationsQuery = locationsQuery.limit(options.limit);
+    }
+
+    if (options.offset) {
+      locationsQuery = locationsQuery.skip(options.offset);
+    }
+
+    const locations = await locationsQuery.exec();
+
+    return { locations, total };
   }
 
   /**
-   * Update location
+   * Calculate distance between two users
    */
-  async update(
-    locationId: string,
-    updateData: {
-      lat?: number;
-      lng?: number;
-      expiresAt?: Date;
-    }
-  ): Promise<ILocationShare | null> {
-    try {
-      return await LocationShare.findByIdAndUpdate(
-        locationId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      ).populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to update location", 500);
-    }
-  }
-
-  /**
-   * Delete location
-   */
-  async delete(locationId: string): Promise<boolean> {
-    try {
-      const result = await LocationShare.findByIdAndDelete(locationId);
-      return !!result;
-    } catch (error) {
-      throw new AppError("Failed to delete location", 500);
-    }
-  }
-
-  /**
-   * Get current active location for a user
-   */
-  async getCurrentLocation(
+  public static async calculateDistanceBetweenUsers(
     coupleId: string,
     userId: string
-  ): Promise<ILocationShare | null> {
-    try {
-      return await LocationShare.findOne({
-        coupleId: new Types.ObjectId(coupleId),
-        userId: new Types.ObjectId(userId),
-        expiresAt: { $gt: new Date() },
-      })
-        .sort({ sharedAt: -1 })
-        .populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to get current location", 500);
-    }
-  }
-
-  /**
-   * Get all active locations for a couple
-   */
-  async getActiveLocations(coupleId: string): Promise<ILocationShare[]> {
-    try {
-      return await LocationShare.find({
-        coupleId: new Types.ObjectId(coupleId),
-        expiresAt: { $gt: new Date() },
-      })
-        .sort({ sharedAt: -1 })
-        .populate("userId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to get active locations", 500);
-    }
-  }
-
-  /**
-   * Share new location (automatically set expiration time)
-   */
-  async shareLocation(locationData: {
-    coupleId: string;
-    userId: string;
-    lat: number;
-    lng: number;
-    durationInMinutes?: number; // Default 60 minutes
-  }): Promise<ILocationShare> {
-    try {
-      const duration = locationData.durationInMinutes || 60;
-      const expiresAt = new Date();
-      expiresAt.setMinutes(expiresAt.getMinutes() + duration);
-
-      return await this.create({
-        coupleId: locationData.coupleId,
-        userId: locationData.userId,
-        lat: locationData.lat,
-        lng: locationData.lng,
-        expiresAt,
-      });
-    } catch (error) {
-      throw new AppError("Failed to share location", 500);
-    }
-  }
-
-  /**
-   * Stop sharing location for a user
-   */
-  async stopSharing(coupleId: string, userId: string): Promise<boolean> {
-    try {
-      const result = await LocationShare.updateMany(
-        {
-          coupleId: new Types.ObjectId(coupleId),
-          userId: new Types.ObjectId(userId),
-          expiresAt: { $gt: new Date() },
-        },
-        { $set: { expiresAt: new Date() } }
-      );
-
-      return result.modifiedCount > 0;
-    } catch (error) {
-      throw new AppError("Failed to stop sharing location", 500);
-    }
-  }
-
-  /**
-   * Get location history for a user
-   */
-  async getLocationHistory(
-    coupleId: string,
-    userId: string,
-    options: {
-      days?: number;
-      limit?: number;
-      offset?: number;
-    } = {}
   ): Promise<{
-    locations: ILocationShare[];
-    total: number;
+    distance: number | null;
+    unit: "km";
+    user1Location: ILocationShare | null;
+    user2Location: ILocationShare | null;
   }> {
-    try {
-      let query: any = {
-        coupleId: new Types.ObjectId(coupleId),
-        userId: new Types.ObjectId(userId),
-      };
-
-      if (options.days) {
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - options.days);
-        query.sharedAt = { $gte: startDate };
-      }
-
-      const total = await LocationShare.countDocuments(query);
-
-      let locationsQuery = LocationShare.find(query)
-        .populate("userId", "name email")
-        .sort({ sharedAt: -1 });
-
-      if (options.limit) {
-        locationsQuery = locationsQuery.limit(options.limit);
-      }
-
-      if (options.offset) {
-        locationsQuery = locationsQuery.skip(options.offset);
-      }
-
-      const locations = await locationsQuery.exec();
-
-      return { locations, total };
-    } catch (error) {
-      throw new AppError("Failed to get location history", 500);
+    // Verify user belongs to couple
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
     }
-  }
 
-  /**
-   * Calculate distance between two locations
-   */
-  async getDistance(
-    location1Id: string,
-    location2Id: string
-  ): Promise<number | null> {
-    try {
-      const [loc1, loc2] = await Promise.all([
-        LocationShare.findById(location1Id),
-        LocationShare.findById(location2Id),
-      ]);
-
-      if (!loc1 || !loc2) {
-        return null;
-      }
-
-      // Haversine formula to calculate distance
-      const R = 6371e3; // Earth's radius in meters
-      const φ1 = (loc1.lat * Math.PI) / 180;
-      const φ2 = (loc2.lat * Math.PI) / 180;
-      const Δφ = ((loc2.lat - loc1.lat) * Math.PI) / 180;
-      const Δλ = ((loc2.lng - loc1.lng) * Math.PI) / 180;
-
-      const a =
-        Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-        Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-      return R * c; // Distance in meters
-    } catch (error) {
-      throw new AppError("Failed to calculate distance", 500);
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
     }
-  }
 
-  /**
-   * Get location statistics
-   */
-  async getStatistics(
-    coupleId: string,
-    options: {
-      userId?: string;
-      days?: number;
-    } = {}
-  ): Promise<{
-    total: number;
-    active: number;
-    thisWeek: number;
-    averagePerDay: number;
-  }> {
-    try {
-      const days = options.days || 30;
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-
-      const startOfWeek = new Date();
-      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-      startOfWeek.setHours(0, 0, 0, 0);
-
-      let matchQuery: any = { coupleId: new Types.ObjectId(coupleId) };
-      let recentMatchQuery: any = {
-        coupleId: new Types.ObjectId(coupleId),
-        sharedAt: { $gte: startDate },
-      };
-      let weekMatchQuery: any = {
-        coupleId: new Types.ObjectId(coupleId),
-        sharedAt: { $gte: startOfWeek },
-      };
-
-      if (options.userId) {
-        matchQuery.userId = new Types.ObjectId(options.userId);
-        recentMatchQuery.userId = new Types.ObjectId(options.userId);
-        weekMatchQuery.userId = new Types.ObjectId(options.userId);
-      }
-
-      const [total, active, thisWeek] = await Promise.all([
-        LocationShare.countDocuments(recentMatchQuery),
-        LocationShare.countDocuments({
-          ...matchQuery,
-          expiresAt: { $gt: new Date() },
-        }),
-        LocationShare.countDocuments(weekMatchQuery),
-      ]);
-
-      const averagePerDay = total / days;
-
-      return {
-        total,
-        active,
-        thisWeek,
-        averagePerDay,
-      };
-    } catch (error) {
-      throw new AppError("Failed to get location statistics", 500);
-    }
-  }
-
-  /**
-   * Check if location exists
-   */
-  async exists(locationId: string): Promise<boolean> {
-    try {
-      if (!Types.ObjectId.isValid(locationId)) {
-        return false;
-      }
-      const location = await LocationShare.findById(locationId).select("_id");
-      return !!location;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Get latest active location for each user in couple
-   */
-  async getLatestActiveLocationsForCouple(
-    coupleId: string
-  ): Promise<ILocationShare[]> {
-    try {
-      return await LocationShare.aggregate([
-        {
-          $match: {
-            coupleId: new Types.ObjectId(coupleId),
-            expiresAt: { $gt: new Date() },
-          },
-        },
-        {
-          $sort: { sharedAt: -1 },
-        },
-        {
-          $group: {
-            _id: "$userId",
-            latestLocation: { $first: "$$ROOT" },
-          },
-        },
-        {
-          $replaceRoot: { newRoot: "$latestLocation" },
-        },
-        {
-          $lookup: {
-            from: "users",
-            localField: "userId",
-            foreignField: "_id",
-            as: "userId",
-            pipeline: [{ $project: { name: 1, email: 1 } }],
-          },
-        },
-        {
-          $unwind: "$userId",
-        },
-      ]);
-    } catch (error) {
+    if (couple.users.length !== 2) {
       throw new AppError(
-        "Failed to get latest active locations for couple",
-        500
+        "Distance calculation requires exactly 2 users in couple",
+        400
       );
     }
+
+    const now = new Date();
+    const [user1Location, user2Location] = await Promise.all([
+      LocationShare.findOne({
+        coupleId: new Types.ObjectId(coupleId),
+        userId: couple.users[0],
+        expiresAt: { $gt: now },
+      }).populate("userId", "name email avatarUrl"),
+      LocationShare.findOne({
+        coupleId: new Types.ObjectId(coupleId),
+        userId: couple.users[1],
+        expiresAt: { $gt: now },
+      }).populate("userId", "name email avatarUrl"),
+    ]);
+
+    let distance: number | null = null;
+
+    if (user1Location && user2Location) {
+      distance = this.calculateHaversineDistance(
+        user1Location.lat,
+        user1Location.lng,
+        user2Location.lat,
+        user2Location.lng
+      );
+    }
+
+    return {
+      distance,
+      unit: "km",
+      user1Location,
+      user2Location,
+    };
   }
 
   /**
-   * Clean up expired locations
+   * Get location sharing statistics
    */
-  async cleanupExpiredLocations(): Promise<number> {
-    try {
-      const result = await LocationShare.deleteMany({
-        expiresAt: { $lt: new Date() },
-      });
-      return result.deletedCount || 0;
-    } catch (error) {
-      throw new AppError("Failed to cleanup expired locations", 500);
+  public static async getLocationStats(
+    coupleId: string,
+    userId: string
+  ): Promise<{
+    totalShares: number;
+    activeShares: number;
+    byUser: { [userId: string]: number };
+    thisWeek: number;
+    averageDistance: number | null;
+  }> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
+
+    const coupleObjectId = new Types.ObjectId(coupleId);
+    const now = new Date();
+    const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const [totalShares, activeShares, thisWeek, userStats] = await Promise.all([
+      LocationShare.countDocuments({ coupleId: coupleObjectId }),
+      LocationShare.countDocuments({
+        coupleId: coupleObjectId,
+        expiresAt: { $gt: now },
+      }),
+      LocationShare.countDocuments({
+        coupleId: coupleObjectId,
+        sharedAt: { $gte: startOfWeek },
+      }),
+      LocationShare.aggregate([
+        { $match: { coupleId: coupleObjectId } },
+        { $group: { _id: "$userId", count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const byUser: { [userId: string]: number } = {};
+    userStats.forEach((stat: any) => {
+      byUser[stat._id.toString()] = stat.count;
+    });
+
+    // Calculate average distance (simplified - would need more complex logic for real averages)
+    const averageDistance = null; // Placeholder for more complex calculation
+
+    return {
+      totalShares,
+      activeShares,
+      byUser,
+      thisWeek,
+      averageDistance,
+    };
+  }
+
+  /**
+   * Clean up expired location shares (utility method)
+   */
+  public static async cleanupExpiredShares(): Promise<number> {
+    const now = new Date();
+    const result = await LocationShare.deleteMany({
+      expiresAt: { $lte: now },
+    });
+
+    return result.deletedCount || 0;
+  }
+
+  /**
+   * Calculate Haversine distance between two coordinates
+   */
+  private static calculateHaversineDistance(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number
+  ): number {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = this.toRadians(lat2 - lat1);
+    const dLng = this.toRadians(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(this.toRadians(lat1)) *
+        Math.cos(this.toRadians(lat2)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c; // Distance in kilometers
+
+    return Math.round(distance * 100) / 100; // Round to 2 decimal places
+  }
+
+  /**
+   * Convert degrees to radians
+   */
+  private static toRadians(degrees: number): number {
+    return degrees * (Math.PI / 180);
+  }
+
+  /**
+   * Helper method to verify couple access
+   */
+  private static async verifyCoupleAccess(
+    coupleId: string,
+    userId: string
+  ): Promise<void> {
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
+    }
+
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
     }
   }
 }

@@ -1,18 +1,46 @@
 import { Types } from "mongoose";
-import { Couple, ICouple } from "../models/Couple.js";
-import { User } from "../models/User.js";
-import { AppError } from "../../utils/AppError.js";
+import { Couple, ICouple } from "../models/Couple";
+import { User } from "../models/User";
+import { AppError } from "../../utils/AppError";
+import { UserRepository } from "./UserRepository";
 
 export class CoupleRepository {
+  private userRepository: UserRepository;
+
+  constructor() {
+    this.userRepository = new UserRepository();
+  }
+
   /**
-   * Create a new couple
+   * Create a new couple with invite code
    */
   async createCouple(
-    userIds: [Types.ObjectId, Types.ObjectId],
+    creatorId: string | Types.ObjectId,
+    partnerEmail: string,
     anniversaryDate: Date,
     relationshipStatus: "dating" | "engaged" | "married" = "dating"
   ): Promise<ICouple> {
     try {
+      // Find partner by email
+      const partner = await this.userRepository.findByEmail(partnerEmail);
+      if (!partner) {
+        throw new AppError("Partner not found with this email", 404);
+      }
+
+      // Check if creator exists
+      const creator = await this.userRepository.findById(creatorId.toString());
+      if (!creator) {
+        throw new AppError("Creator not found", 404);
+      }
+
+      // Check if either user is already in a couple
+      if (creator.coupleId) {
+        throw new AppError("You are already in a couple", 400);
+      }
+      if (partner.coupleId) {
+        throw new AppError("Partner is already in a couple", 400);
+      }
+
       // Generate unique invite code
       let inviteCode = this.generateInviteCode();
 
@@ -23,15 +51,27 @@ export class CoupleRepository {
 
       // Create couple
       const couple = new Couple({
-        users: userIds,
+        users: [creator._id, partner._id],
         anniversaryDate,
         relationshipStatus,
         inviteCode,
-        status: "active",
+        settings: {
+          shareLocation: false,
+          allowPartnerToSeeNotes: true,
+          allowPartnerToSeeMoods: true,
+          allowPartnerToSeePhotos: true,
+        },
       });
 
       await couple.save();
-      return couple.populate("users", "name email avatarUrl");
+
+      // Update both users' coupleId
+      await Promise.all([
+        this.userRepository.setUserCouple(creator._id.toString(), couple._id),
+        this.userRepository.setUserCouple(partner._id.toString(), couple._id),
+      ]);
+
+      return await couple.populate("users", "-passwordHash");
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new AppError("Failed to create couple", 500);
@@ -39,322 +79,108 @@ export class CoupleRepository {
   }
 
   /**
-   * Find couple by ID
+   * Generate a unique invite code
    */
-  async findById(coupleId: string): Promise<ICouple | null> {
-    try {
-      if (!Types.ObjectId.isValid(coupleId)) {
-        return null;
-      }
-      return await Couple.findById(coupleId).populate(
-        "users",
-        "name email avatarUrl"
-      );
-    } catch (error) {
-      throw new AppError("Failed to find couple", 500);
+  private generateInviteCode(): string {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let result = "";
+    for (let i = 0; i < 8; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    return result;
   }
 
   /**
-   * Find couple by invite code
+   * Join couple by invite code
    */
-  async findByInviteCode(inviteCode: string): Promise<ICouple | null> {
-    try {
-      return await Couple.findOne({ inviteCode }).populate(
-        "users",
-        "name email avatarUrl"
-      );
-    } catch (error) {
-      throw new AppError("Failed to find couple by invite code", 500);
-    }
-  }
-
-  /**
-   * Find couple by user ID
-   */
-  async findByUserId(userId: string): Promise<ICouple | null> {
-    try {
-      if (!Types.ObjectId.isValid(userId)) {
-        return null;
-      }
-      return await Couple.findOne({
-        users: new Types.ObjectId(userId),
-      }).populate("users", "name email avatarUrl");
-    } catch (error) {
-      throw new AppError("Failed to find couple by user ID", 500);
-    }
-  }
-
-  /**
-   * Update couple
-   */
-  async updateCouple(
-    coupleId: string,
-    updateData: {
-      anniversaryDate?: Date;
-      relationshipStatus?: "dating" | "engaged" | "married";
-      bio?: string;
-      status?: "active" | "inactive";
-      settings?: {
-        shareLocation?: boolean;
-        shareCalendar?: boolean;
-        allowInvitations?: boolean;
-        privacy?: "public" | "private";
-      };
-    }
+  async joinCoupleByInviteCode(
+    userId: string | Types.ObjectId,
+    inviteCode: string
   ): Promise<ICouple> {
     try {
-      const couple = await Couple.findByIdAndUpdate(
-        coupleId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      ).populate("users", "name email avatarUrl");
-
-      if (!couple) {
-        throw new AppError("Couple not found", 404);
+      const user = await User.findById(userId);
+      if (!user) {
+        throw new AppError("User not found", 404);
       }
 
-      return couple;
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to update couple", 500);
-    }
-  }
-
-  /**
-   * Delete couple
-   */
-  async deleteCouple(coupleId: string): Promise<void> {
-    try {
-      const couple = await Couple.findById(coupleId);
-      if (!couple) {
-        throw new AppError("Couple not found", 404);
+      if (user.coupleId) {
+        throw new AppError("User is already in a couple", 409);
       }
 
-      // Remove couple reference from users
-      await User.updateMany(
-        { _id: { $in: couple.users } },
-        { $unset: { coupleId: 1 } }
-      );
-
-      // Delete couple
-      await Couple.findByIdAndDelete(coupleId);
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to delete couple", 500);
-    }
-  }
-
-  /**
-   * Add user to couple
-   */
-  async addUserToCouple(coupleId: string, userId: string): Promise<ICouple> {
-    try {
-      const couple = await Couple.findById(coupleId);
+      const couple = await Couple.findOne({
+        inviteCode: inviteCode.toUpperCase(),
+      });
       if (!couple) {
-        throw new AppError("Couple not found", 404);
+        throw new AppError("Invalid invite code", 404);
       }
 
       if (couple.users.length >= 2) {
-        throw new AppError("Couple already has maximum users", 400);
+        throw new AppError("Couple is already complete", 409);
       }
 
-      const userObjectId = new Types.ObjectId(userId);
-      if (couple.users.some((id) => id.equals(userObjectId))) {
-        throw new AppError("User is already in this couple", 400);
+      // Check if user is already in this couple
+      if (couple.users.some((id) => id.equals(user._id))) {
+        throw new AppError("User is already part of this couple", 409);
       }
 
-      couple.users.push(userObjectId);
+      // Add user to couple
+      couple.users.push(user._id);
       await couple.save();
 
-      // Update user's couple reference
-      await User.findByIdAndUpdate(userId, { coupleId: couple._id });
+      // Update user with couple ID
+      await this.userRepository.setUserCouple(userId, couple._id);
 
-      return couple.populate("users", "name email avatarUrl");
+      return await couple.populate("users", "name email avatarUrl");
     } catch (error) {
       if (error instanceof AppError) throw error;
-      throw new AppError("Failed to add user to couple", 500);
+      throw new AppError("Failed to join couple", 500);
     }
   }
 
   /**
-   * Remove user from couple
+   * Get couple by ID
    */
-  async removeUserFromCouple(
-    coupleId: string,
-    userId: string
+  async getCoupleById(
+    coupleId: string | Types.ObjectId
   ): Promise<ICouple | null> {
     try {
-      const couple = await Couple.findById(coupleId);
-      if (!couple) {
-        throw new AppError("Couple not found", 404);
-      }
+      return await Couple.findById(coupleId).populate(
+        "users",
+        "name email avatarUrl gender birthday"
+      );
+    } catch (error) {
+      throw new AppError("Failed to get couple", 500);
+    }
+  }
 
-      const userObjectId = new Types.ObjectId(userId);
-      couple.users = couple.users.filter((id) => !id.equals(userObjectId));
-
-      // Update user's couple reference
-      await User.findByIdAndUpdate(userId, { $unset: { coupleId: 1 } });
-
-      if (couple.users.length === 0) {
-        // Delete couple if no users left
-        await Couple.findByIdAndDelete(coupleId);
+  /**
+   * Get couple by user ID
+   */
+  async getCoupleByUserId(
+    userId: string | Types.ObjectId
+  ): Promise<ICouple | null> {
+    try {
+      const user = await User.findById(userId);
+      if (!user || !user.coupleId) {
         return null;
       }
 
-      await couple.save();
-      return couple.populate("users", "name email avatarUrl");
+      return await this.getCoupleById(user.coupleId);
     } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to remove user from couple", 500);
-    }
-  }
-
-  /**
-   * Regenerate invite code
-   */
-  async regenerateInviteCode(coupleId: string): Promise<string> {
-    try {
-      let newInviteCode = this.generateInviteCode();
-
-      // Ensure new invite code is unique
-      while (await Couple.findOne({ inviteCode: newInviteCode })) {
-        newInviteCode = this.generateInviteCode();
-      }
-
-      await Couple.findByIdAndUpdate(coupleId, { inviteCode: newInviteCode });
-      return newInviteCode;
-    } catch (error) {
-      throw new AppError("Failed to regenerate invite code", 500);
-    }
-  }
-
-  /**
-   * Get couple statistics
-   */
-  async getCoupleStats(coupleId: string): Promise<{
-    createdAt: Date;
-    daysTogether: number;
-    status: string;
-    userCount: number;
-    anniversaryDate: Date;
-  }> {
-    try {
-      const couple = await Couple.findById(coupleId);
-      if (!couple) {
-        throw new AppError("Couple not found", 404);
-      }
-
-      const now = new Date();
-      const daysTogether = Math.floor(
-        (now.getTime() - couple.createdAt.getTime()) / (1000 * 60 * 60 * 24)
-      );
-
-      return {
-        createdAt: couple.createdAt,
-        daysTogether,
-        status: couple.status,
-        userCount: couple.users.length,
-        anniversaryDate: couple.anniversaryDate,
-      };
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to get couple statistics", 500);
-    }
-  }
-
-  /**
-   * Check if user belongs to couple
-   */
-  async isUserInCouple(coupleId: string, userId: string): Promise<boolean> {
-    try {
-      if (
-        !Types.ObjectId.isValid(coupleId) ||
-        !Types.ObjectId.isValid(userId)
-      ) {
-        return false;
-      }
-
-      const couple = await Couple.findById(coupleId);
-      if (!couple) {
-        return false;
-      }
-
-      return couple.users.some((id) => id.toString() === userId);
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Get all couples (admin function)
-   */
-  async getAllCouples(
-    options: {
-      status?: "active" | "inactive";
-      limit?: number;
-      offset?: number;
-    } = {}
-  ): Promise<{
-    couples: ICouple[];
-    total: number;
-  }> {
-    try {
-      let query: any = {};
-      if (options.status) {
-        query.status = options.status;
-      }
-
-      const total = await Couple.countDocuments(query);
-
-      let couplesQuery = Couple.find(query).populate(
-        "users",
-        "name email avatarUrl"
-      );
-
-      if (options.limit) {
-        couplesQuery = couplesQuery.limit(options.limit);
-      }
-
-      if (options.offset) {
-        couplesQuery = couplesQuery.skip(options.offset);
-      }
-
-      const couples = await couplesQuery.sort({ createdAt: -1 }).exec();
-
-      return { couples, total };
-    } catch (error) {
-      throw new AppError("Failed to get all couples", 500);
-    }
-  }
-
-  /**
-   * Check if couple exists
-   */
-  async exists(coupleId: string): Promise<boolean> {
-    try {
-      if (!Types.ObjectId.isValid(coupleId)) {
-        return false;
-      }
-      const couple = await Couple.findById(coupleId).select("_id");
-      return !!couple;
-    } catch (error) {
-      return false;
+      throw new AppError("Failed to get couple", 500);
     }
   }
 
   /**
    * Update couple settings
    */
-  async updateSettings(
-    coupleId: string,
+  async updateCoupleSettings(
+    coupleId: string | Types.ObjectId,
     settings: {
-      shareLocation?: boolean;
-      shareCalendar?: boolean;
-      allowInvitations?: boolean;
-      privacy?: "public" | "private";
+      allowLocationShare?: boolean;
+      theme?: string;
     }
-  ): Promise<ICouple> {
+  ): Promise<ICouple | null> {
     try {
       const couple = await Couple.findByIdAndUpdate(
         coupleId,
@@ -374,16 +200,182 @@ export class CoupleRepository {
   }
 
   /**
-   * Generate random invite code
+   * Update anniversary date
    */
-  private generateInviteCode(): string {
-    const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let result = "";
-    for (let i = 0; i < 8; i++) {
-      result += characters.charAt(
-        Math.floor(Math.random() * characters.length)
-      );
+  async updateAnniversaryDate(
+    coupleId: string | Types.ObjectId,
+    anniversaryDate: Date
+  ): Promise<ICouple | null> {
+    try {
+      const couple = await Couple.findByIdAndUpdate(
+        coupleId,
+        { $set: { anniversaryDate } },
+        { new: true, runValidators: true }
+      ).populate("users", "name email avatarUrl");
+
+      if (!couple) {
+        throw new AppError("Couple not found", 404);
+      }
+
+      return couple;
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("Failed to update anniversary date", 500);
     }
-    return result;
+  }
+
+  /**
+   * Generate new invite code
+   */
+  async generateNewInviteCode(
+    coupleId: string | Types.ObjectId
+  ): Promise<string> {
+    try {
+      const couple = await Couple.findById(coupleId);
+      if (!couple) {
+        throw new AppError("Couple not found", 404);
+      }
+
+      const newInviteCode = await (Couple as any).generateInviteCode();
+      couple.inviteCode = newInviteCode;
+      await couple.save();
+
+      return newInviteCode;
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("Failed to generate new invite code", 500);
+    }
+  }
+
+  /**
+   * Remove user from couple
+   */
+  async removeUserFromCouple(
+    coupleId: string | Types.ObjectId,
+    userId: string | Types.ObjectId
+  ): Promise<void> {
+    try {
+      const couple = await Couple.findById(coupleId);
+      if (!couple) {
+        throw new AppError("Couple not found", 404);
+      }
+
+      // Remove user from couple
+      couple.users = couple.users.filter((id) => !id.equals(userId));
+
+      if (couple.users.length === 0) {
+        // If no users left, delete the couple
+        await Couple.findByIdAndDelete(coupleId);
+      } else {
+        await couple.save();
+      }
+
+      // Remove couple ID from user
+      await this.userRepository.removeFromCouple(userId);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("Failed to remove user from couple", 500);
+    }
+  }
+
+  /**
+   * Delete couple
+   */
+  async deleteCouple(coupleId: string | Types.ObjectId): Promise<void> {
+    try {
+      const couple = await Couple.findById(coupleId);
+      if (!couple) {
+        throw new AppError("Couple not found", 404);
+      }
+
+      // Remove couple ID from all users
+      await Promise.all(
+        couple.users.map((userId) =>
+          this.userRepository.removeFromCouple(userId)
+        )
+      );
+
+      // Delete the couple
+      await Couple.findByIdAndDelete(coupleId);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("Failed to delete couple", 500);
+    }
+  }
+
+  /**
+   * Check if user belongs to couple
+   */
+  async isUserInCouple(
+    coupleId: string | Types.ObjectId,
+    userId: string | Types.ObjectId
+  ): Promise<boolean> {
+    try {
+      const couple = await Couple.findById(coupleId);
+      if (!couple) {
+        return false;
+      }
+
+      return couple.users.some((id) => id.equals(userId));
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Get partner in couple
+   */
+  async getPartner(
+    coupleId: string | Types.ObjectId,
+    userId: string | Types.ObjectId
+  ): Promise<any | null> {
+    try {
+      const couple = await Couple.findById(coupleId).populate(
+        "users",
+        "name email avatarUrl gender birthday"
+      );
+      if (!couple) {
+        return null;
+      }
+
+      return couple.users.find((user: any) => !user._id.equals(userId)) || null;
+    } catch (error) {
+      throw new AppError("Failed to get partner", 500);
+    }
+  }
+
+  /**
+   * Get couples with pagination (admin function)
+   */
+  async getCouples(
+    page: number = 1,
+    limit: number = 10
+  ): Promise<{
+    couples: ICouple[];
+    total: number;
+    totalPages: number;
+    currentPage: number;
+  }> {
+    try {
+      const skip = (page - 1) * limit;
+
+      const [couples, total] = await Promise.all([
+        Couple.find()
+          .populate("users", "name email avatarUrl")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit),
+        Couple.countDocuments(),
+      ]);
+
+      return {
+        couples,
+        total,
+        totalPages: Math.ceil(total / limit),
+        currentPage: page,
+      };
+    } catch (error) {
+      throw new AppError("Failed to get couples", 500);
+    }
   }
 }

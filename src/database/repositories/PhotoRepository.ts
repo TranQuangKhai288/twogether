@@ -1,53 +1,53 @@
 import { Types } from "mongoose";
 import { Photo, IPhoto } from "../models/Photo";
+import { Couple } from "../models/Couple";
 import { AppError } from "../../utils/AppError";
 
 export class PhotoRepository {
   /**
-   * Create a new photo
+   * Upload a new photo
    */
-  async create(photoData: {
-    coupleId: string;
-    uploaderId: string;
-    url: string;
-    caption?: string;
-    isFavorite?: boolean;
-  }): Promise<IPhoto> {
-    try {
-      const photo = new Photo({
-        coupleId: new Types.ObjectId(photoData.coupleId),
-        uploaderId: new Types.ObjectId(photoData.uploaderId),
-        url: photoData.url,
-        caption: photoData.caption,
-        isFavorite: photoData.isFavorite ?? false,
-      });
-
-      await photo.save();
-      return photo.populate("uploaderId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to create photo", 500);
-    }
-  }
-
-  /**
-   * Find photo by ID
-   */
-  async findById(photoId: string): Promise<IPhoto | null> {
-    try {
-      if (!Types.ObjectId.isValid(photoId)) {
-        return null;
-      }
-      return await Photo.findById(photoId).populate("uploaderId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to find photo", 500);
-    }
-  }
-
-  /**
-   * Find photos by couple ID
-   */
-  async findByCoupleId(
+  public static async uploadPhoto(
     coupleId: string,
+    uploaderId: string,
+    photoData: {
+      url: string;
+      caption?: string;
+      isFavorite?: boolean;
+    }
+  ): Promise<IPhoto> {
+    // Verify couple exists and user belongs to it
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
+    }
+
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === uploaderId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
+    }
+
+    // Create photo
+    const photo = new Photo({
+      coupleId: new Types.ObjectId(coupleId),
+      uploaderId: new Types.ObjectId(uploaderId),
+      url: photoData.url,
+      caption: photoData.caption,
+      isFavorite: photoData.isFavorite ?? false,
+    });
+
+    await photo.save();
+    return photo;
+  }
+
+  /**
+   * Get all photos for a couple
+   */
+  public static async getCouplePhotos(
+    coupleId: string,
+    userId: string,
     options: {
       favoritesOnly?: boolean;
       uploaderId?: string;
@@ -58,79 +58,147 @@ export class PhotoRepository {
   ): Promise<{
     photos: IPhoto[];
     total: number;
+    favoritesCount: number;
   }> {
-    try {
-      let query: any = { coupleId: new Types.ObjectId(coupleId) };
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      if (options.favoritesOnly) {
-        query.isFavorite = true;
-      }
+    let query: any = { coupleId: new Types.ObjectId(coupleId) };
 
-      if (options.uploaderId) {
-        query.uploaderId = new Types.ObjectId(options.uploaderId);
-      }
-
-      const total = await Photo.countDocuments(query);
-
-      let photosQuery = Photo.find(query).populate("uploaderId", "name email");
-
-      const sortOrder = options.sortBy === "oldest" ? 1 : -1;
-      photosQuery = photosQuery.sort({ createdAt: sortOrder });
-
-      if (options.limit) {
-        photosQuery = photosQuery.limit(options.limit);
-      }
-
-      if (options.offset) {
-        photosQuery = photosQuery.skip(options.offset);
-      }
-
-      const photos = await photosQuery.exec();
-
-      return { photos, total };
-    } catch (error) {
-      throw new AppError("Failed to find photos by couple", 500);
+    // Filter by favorites only
+    if (options.favoritesOnly) {
+      query.isFavorite = true;
     }
+
+    // Filter by uploader
+    if (options.uploaderId) {
+      query.uploaderId = new Types.ObjectId(options.uploaderId);
+    }
+
+    const total = await Photo.countDocuments(query);
+    const favoritesCount = await Photo.countDocuments({
+      coupleId: new Types.ObjectId(coupleId),
+      isFavorite: true,
+    });
+
+    let photosQuery = Photo.find(query).populate("uploaderId", "name email");
+
+    // Sorting
+    const sortOrder = options.sortBy === "oldest" ? 1 : -1;
+    photosQuery = photosQuery.sort({ createdAt: sortOrder });
+
+    if (options.limit) {
+      photosQuery = photosQuery.limit(options.limit);
+    }
+
+    if (options.offset) {
+      photosQuery = photosQuery.skip(options.offset);
+    }
+
+    const photos = await photosQuery.exec();
+
+    return { photos, total, favoritesCount };
+  }
+
+  /**
+   * Get photo by ID
+   */
+  public static async getPhotoById(
+    photoId: string,
+    userId: string
+  ): Promise<IPhoto> {
+    const photo = await Photo.findById(photoId).populate(
+      "uploaderId",
+      "name email"
+    );
+    if (!photo) {
+      throw new AppError("Photo not found", 404);
+    }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(photo.coupleId.toString(), userId);
+
+    return photo;
   }
 
   /**
    * Update photo
    */
-  async update(
+  public static async updatePhoto(
     photoId: string,
+    userId: string,
     updateData: {
       caption?: string;
       isFavorite?: boolean;
     }
-  ): Promise<IPhoto | null> {
-    try {
-      return await Photo.findByIdAndUpdate(
-        photoId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      ).populate("uploaderId", "name email");
-    } catch (error) {
-      throw new AppError("Failed to update photo", 500);
+  ): Promise<IPhoto> {
+    const photo = await Photo.findById(photoId);
+    if (!photo) {
+      throw new AppError("Photo not found", 404);
     }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(photo.coupleId.toString(), userId);
+
+    // Update fields
+    if (updateData.caption !== undefined) photo.caption = updateData.caption;
+    if (updateData.isFavorite !== undefined)
+      photo.isFavorite = updateData.isFavorite;
+
+    await photo.save();
+    return photo.populate("uploaderId", "name email");
   }
 
   /**
    * Delete photo
    */
-  async delete(photoId: string): Promise<boolean> {
-    try {
-      const result = await Photo.findByIdAndDelete(photoId);
-      return !!result;
-    } catch (error) {
-      throw new AppError("Failed to delete photo", 500);
+  public static async deletePhoto(
+    photoId: string,
+    userId: string
+  ): Promise<void> {
+    const photo = await Photo.findById(photoId);
+    if (!photo) {
+      throw new AppError("Photo not found", 404);
     }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(photo.coupleId.toString(), userId);
+
+    // Only the uploader can delete their own photo
+    if (photo.uploaderId.toString() !== userId) {
+      throw new AppError("You can only delete your own photos", 403);
+    }
+
+    await Photo.findByIdAndDelete(photoId);
+  }
+
+  /**
+   * Toggle favorite status
+   */
+  public static async toggleFavorite(
+    photoId: string,
+    userId: string
+  ): Promise<IPhoto> {
+    const photo = await Photo.findById(photoId);
+    if (!photo) {
+      throw new AppError("Photo not found", 404);
+    }
+
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(photo.coupleId.toString(), userId);
+
+    photo.isFavorite = !photo.isFavorite;
+    await photo.save();
+
+    return photo.populate("uploaderId", "name email");
   }
 
   /**
    * Get favorite photos
    */
-  async getFavorites(
+  public static async getFavoritePhotos(
     coupleId: string,
+    userId: string,
     options: {
       limit?: number;
       offset?: number;
@@ -139,40 +207,40 @@ export class PhotoRepository {
     photos: IPhoto[];
     total: number;
   }> {
-    try {
-      const query = {
-        coupleId: new Types.ObjectId(coupleId),
-        isFavorite: true,
-      };
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      const total = await Photo.countDocuments(query);
+    const query = {
+      coupleId: new Types.ObjectId(coupleId),
+      isFavorite: true,
+    };
 
-      let photosQuery = Photo.find(query)
-        .populate("uploaderId", "name email")
-        .sort({ createdAt: -1 });
+    const total = await Photo.countDocuments(query);
 
-      if (options.limit) {
-        photosQuery = photosQuery.limit(options.limit);
-      }
+    let photosQuery = Photo.find(query)
+      .populate("uploaderId", "name email")
+      .sort({ createdAt: -1 });
 
-      if (options.offset) {
-        photosQuery = photosQuery.skip(options.offset);
-      }
-
-      const photos = await photosQuery.exec();
-
-      return { photos, total };
-    } catch (error) {
-      throw new AppError("Failed to get favorite photos", 500);
+    if (options.limit) {
+      photosQuery = photosQuery.limit(options.limit);
     }
+
+    if (options.offset) {
+      photosQuery = photosQuery.skip(options.offset);
+    }
+
+    const photos = await photosQuery.exec();
+
+    return { photos, total };
   }
 
   /**
    * Get photos by uploader
    */
-  async findByUploader(
+  public static async getPhotosByUploader(
     coupleId: string,
     uploaderId: string,
+    userId: string,
     options: {
       limit?: number;
       offset?: number;
@@ -181,39 +249,79 @@ export class PhotoRepository {
     photos: IPhoto[];
     total: number;
   }> {
-    try {
-      const query = {
-        coupleId: new Types.ObjectId(coupleId),
-        uploaderId: new Types.ObjectId(uploaderId),
-      };
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      const total = await Photo.countDocuments(query);
+    const query = {
+      coupleId: new Types.ObjectId(coupleId),
+      uploaderId: new Types.ObjectId(uploaderId),
+    };
 
-      let photosQuery = Photo.find(query)
-        .populate("uploaderId", "name email")
-        .sort({ createdAt: -1 });
+    const total = await Photo.countDocuments(query);
 
-      if (options.limit) {
-        photosQuery = photosQuery.limit(options.limit);
-      }
+    let photosQuery = Photo.find(query)
+      .populate("uploaderId", "name email")
+      .sort({ createdAt: -1 });
 
-      if (options.offset) {
-        photosQuery = photosQuery.skip(options.offset);
-      }
-
-      const photos = await photosQuery.exec();
-
-      return { photos, total };
-    } catch (error) {
-      throw new AppError("Failed to find photos by uploader", 500);
+    if (options.limit) {
+      photosQuery = photosQuery.limit(options.limit);
     }
+
+    if (options.offset) {
+      photosQuery = photosQuery.skip(options.offset);
+    }
+
+    const photos = await photosQuery.exec();
+
+    return { photos, total };
+  }
+
+  /**
+   * Get photo statistics
+   */
+  public static async getPhotoStats(
+    coupleId: string,
+    userId: string
+  ): Promise<{
+    total: number;
+    favorites: number;
+    byUploader: { [uploaderId: string]: number };
+    thisMonth: number;
+  }> {
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
+
+    const coupleObjectId = new Types.ObjectId(coupleId);
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [total, favorites, thisMonth, uploaderStats] = await Promise.all([
+      Photo.countDocuments({ coupleId: coupleObjectId }),
+      Photo.countDocuments({ coupleId: coupleObjectId, isFavorite: true }),
+      Photo.countDocuments({
+        coupleId: coupleObjectId,
+        createdAt: { $gte: startOfMonth },
+      }),
+      Photo.aggregate([
+        { $match: { coupleId: coupleObjectId } },
+        { $group: { _id: "$uploaderId", count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const byUploader: { [uploaderId: string]: number } = {};
+    uploaderStats.forEach((stat: any) => {
+      byUploader[stat._id.toString()] = stat.count;
+    });
+
+    return { total, favorites, byUploader, thisMonth };
   }
 
   /**
    * Search photos by caption
    */
-  async searchByCaption(
+  public static async searchPhotos(
     coupleId: string,
+    userId: string,
     searchTerm: string,
     options: {
       limit?: number;
@@ -223,98 +331,50 @@ export class PhotoRepository {
     photos: IPhoto[];
     total: number;
   }> {
-    try {
-      const query = {
-        coupleId: new Types.ObjectId(coupleId),
-        caption: { $regex: searchTerm, $options: "i" },
-      };
+    // Verify user belongs to couple
+    await this.verifyCoupleAccess(coupleId, userId);
 
-      const total = await Photo.countDocuments(query);
+    const query = {
+      coupleId: new Types.ObjectId(coupleId),
+      caption: { $regex: searchTerm, $options: "i" },
+    };
 
-      let photosQuery = Photo.find(query)
-        .populate("uploaderId", "name email")
-        .sort({ createdAt: -1 });
+    const total = await Photo.countDocuments(query);
 
-      if (options.limit) {
-        photosQuery = photosQuery.limit(options.limit);
-      }
+    let photosQuery = Photo.find(query)
+      .populate("uploaderId", "name email")
+      .sort({ createdAt: -1 });
 
-      if (options.offset) {
-        photosQuery = photosQuery.skip(options.offset);
-      }
-
-      const photos = await photosQuery.exec();
-
-      return { photos, total };
-    } catch (error) {
-      throw new AppError("Failed to search photos", 500);
+    if (options.limit) {
+      photosQuery = photosQuery.limit(options.limit);
     }
+
+    if (options.offset) {
+      photosQuery = photosQuery.skip(options.offset);
+    }
+
+    const photos = await photosQuery.exec();
+
+    return { photos, total };
   }
 
   /**
-   * Get photo statistics
+   * Helper method to verify couple access
    */
-  async getStatistics(coupleId: string): Promise<{
-    total: number;
-    favorites: number;
-    byUploader: { [uploaderId: string]: number };
-    thisMonth: number;
-  }> {
-    try {
-      const coupleObjectId = new Types.ObjectId(coupleId);
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-      const [total, favorites, thisMonth, uploaderStats] = await Promise.all([
-        Photo.countDocuments({ coupleId: coupleObjectId }),
-        Photo.countDocuments({ coupleId: coupleObjectId, isFavorite: true }),
-        Photo.countDocuments({
-          coupleId: coupleObjectId,
-          createdAt: { $gte: startOfMonth },
-        }),
-        Photo.aggregate([
-          { $match: { coupleId: coupleObjectId } },
-          { $group: { _id: "$uploaderId", count: { $sum: 1 } } },
-        ]),
-      ]);
-
-      const byUploader: { [uploaderId: string]: number } = {};
-      uploaderStats.forEach((stat: any) => {
-        byUploader[stat._id.toString()] = stat.count;
-      });
-
-      return { total, favorites, byUploader, thisMonth };
-    } catch (error) {
-      throw new AppError("Failed to get photo statistics", 500);
+  private static async verifyCoupleAccess(
+    coupleId: string,
+    userId: string
+  ): Promise<void> {
+    const couple = await Couple.findById(coupleId);
+    if (!couple) {
+      throw new AppError("Couple not found", 404);
     }
-  }
 
-  /**
-   * Get favorites count for couple
-   */
-  async getFavoritesCount(coupleId: string): Promise<number> {
-    try {
-      return await Photo.countDocuments({
-        coupleId: new Types.ObjectId(coupleId),
-        isFavorite: true,
-      });
-    } catch (error) {
-      throw new AppError("Failed to get favorites count", 500);
-    }
-  }
-
-  /**
-   * Check if photo exists
-   */
-  async exists(photoId: string): Promise<boolean> {
-    try {
-      if (!Types.ObjectId.isValid(photoId)) {
-        return false;
-      }
-      const photo = await Photo.findById(photoId).select("_id");
-      return !!photo;
-    } catch (error) {
-      return false;
+    const userInCouple = couple.users.some(
+      (user) => user.toString() === userId
+    );
+    if (!userInCouple) {
+      throw new AppError("You are not a member of this couple", 403);
     }
   }
 }

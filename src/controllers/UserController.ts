@@ -1,14 +1,14 @@
 import { Request, Response } from "express";
 import { ApiResponse, PaginatedResponse } from "@/types/index";
 import { AppError } from "@/utils/AppError";
-import { UserService } from "@/database/services/UserService";
+import { UserRepository } from "@/database/repositories/UserRepository";
 import { asyncHandler } from "@/utils/asyncHandler";
 
 export class UserController {
-  private userService: UserService;
+  private userRepository: UserRepository;
 
   constructor() {
-    this.userService = new UserService();
+    this.userRepository = new UserRepository();
   }
   /**
    * Get all users with pagination
@@ -31,14 +31,14 @@ export class UserController {
       }
 
       // Get users with pagination
-      const users = await this.userService.findUsers(filter, {
+      const users = await this.userRepository.findUsers(filter, {
         page,
         limit,
         sortBy,
         sortOrder,
       });
 
-      const total = await this.userService.countUsers(filter);
+      const total = await this.userRepository.countUsers(filter);
       const totalPages = Math.ceil(total / limit);
 
       const response: PaginatedResponse<any> = {
@@ -82,7 +82,7 @@ export class UserController {
         throw new AppError("User ID is required", 400);
       }
 
-      const user = await this.userService.findById(id);
+      const user = await this.userRepository.findById(id);
 
       if (!user) {
         throw new AppError("User not found", 404);
@@ -126,7 +126,7 @@ export class UserController {
       delete updateData.passwordHash;
       delete updateData._id;
 
-      const updatedUser = await this.userService.updateUser(id, updateData);
+      const updatedUser = await this.userRepository.updateUser(id, updateData);
 
       if (!updatedUser) {
         throw new AppError("User not found", 404);
@@ -166,13 +166,13 @@ export class UserController {
       }
 
       // Check if user exists
-      const user = await this.userService.findById(id);
+      const user = await this.userRepository.findById(id);
       if (!user) {
         throw new AppError("User not found", 404);
       }
 
       // Delete user (this will also handle couple relationships)
-      await this.userService.deleteUser(id);
+      await this.userRepository.deleteUser(id);
 
       const response: ApiResponse = {
         success: true,
@@ -227,7 +227,7 @@ export class UserController {
       delete updateData._id;
       delete updateData.coupleId; // Couple linking should be handled separately
 
-      const updatedUser = await this.userService.updateUser(
+      const updatedUser = await this.userRepository.updateUser(
         userId.toString(),
         updateData
       );
@@ -282,7 +282,7 @@ export class UserController {
       }
 
       // Change password
-      await this.userService.changePassword(
+      await this.userRepository.changePassword(
         userId.toString(),
         currentPassword,
         newPassword
@@ -310,7 +310,7 @@ export class UserController {
         throw new AppError("Preferences data is required", 400);
       }
 
-      const updatedUser = await this.userService.updatePreferences(
+      const updatedUser = await this.userRepository.updatePreferences(
         userId.toString(),
         preferences
       );
@@ -353,7 +353,7 @@ export class UserController {
         return;
       }
 
-      const userWithCouple = await this.userService.findById(
+      const userWithCouple = await this.userRepository.findById(
         user._id.toString()
       );
 
@@ -392,14 +392,14 @@ export class UserController {
         ],
       };
 
-      const users = await this.userService.findUsers(filter, {
+      const users = await this.userRepository.findUsers(filter, {
         page: pageNum,
         limit: limitNum,
         sortBy: "name",
         sortOrder: "asc",
       });
 
-      const total = await this.userService.countUsers(filter);
+      const total = await this.userRepository.countUsers(filter);
       const totalPages = Math.ceil(total / limitNum);
 
       const response: PaginatedResponse<any> = {
