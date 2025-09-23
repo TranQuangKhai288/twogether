@@ -30,7 +30,7 @@ export class CoupleInvitationController {
         }
 
         let result;
-        let message: string;
+        let message = "";
 
         switch (action) {
           case "accept":
@@ -38,14 +38,23 @@ export class CoupleInvitationController {
               id,
               userId.toString()
             );
-            message = "Invitation accepted successfully! Couple created.";
+            if (typeof result === "string") {
+              message = result; // Error message from repository
+            } else {
+              message = "Invitation accepted successfully! Couple created.";
+            }
             break;
           case "reject":
             result = await this.invitationRepository.rejectInvitation(
               id,
               userId.toString()
             );
-            message = "Invitation rejected successfully";
+            if (typeof result === "string") {
+              message = result; // Error message from repository
+            } else {
+              message = "Invitation rejected successfully";
+            }
+
             break;
           case "cancel":
             result = await this.invitationRepository.cancelInvitation(
@@ -60,7 +69,7 @@ export class CoupleInvitationController {
 
         const response: ApiResponse = {
           success: true,
-          message,
+          message: message,
           data: result,
           timestamp: new Date().toISOString(),
         };

@@ -34,10 +34,10 @@ export class CoupleRepository {
       }
 
       // Check if either user is already in a couple
-      if (creator.coupleId) {
+      if (creator.couple) {
         throw new AppError("You are already in a couple", 400);
       }
-      if (partner.coupleId) {
+      if (partner.couple) {
         throw new AppError("Partner is already in a couple", 400);
       }
 
@@ -103,7 +103,7 @@ export class CoupleRepository {
         throw new AppError("User not found", 404);
       }
 
-      if (user.coupleId) {
+      if (user.couple) {
         throw new AppError("User is already in a couple", 409);
       }
 
@@ -161,11 +161,11 @@ export class CoupleRepository {
   ): Promise<ICouple | null> {
     try {
       const user = await User.findById(userId);
-      if (!user || !user.coupleId) {
+      if (!user || !user.couple) {
         return null;
       }
 
-      return await this.getCoupleById(user.coupleId);
+      return await this.getCoupleById(user.couple);
     } catch (error) {
       throw new AppError("Failed to get couple", 500);
     }

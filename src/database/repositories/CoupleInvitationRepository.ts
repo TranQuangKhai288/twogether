@@ -40,12 +40,12 @@ export class CoupleInvitationRepository {
       }
 
       // Check if sender is already in a couple
-      if (sender.coupleId) {
+      if (sender.couple) {
         throw new AppError("You are already in a couple", 400);
       }
 
       // Check if receiver is already in a couple
-      if (receiver.coupleId) {
+      if (receiver.couple) {
         throw new AppError("This person is already in a couple", 400);
       }
 
@@ -169,12 +169,17 @@ export class CoupleInvitationRepository {
         invitation.receiver._id.toString()
       );
 
-      if (sender?.coupleId) {
+      if (sender?.couple) {
         throw new AppError("The sender is already in a couple", 400);
       }
 
-      if (receiver?.coupleId) {
+      if (receiver?.couple) {
         throw new AppError("You are already in a couple", 400);
+      }
+
+      // Prevent self-invitation acceptance (shouldn't happen in practice)
+      if (sender?._id.equals(receiver?._id)) {
+        throw new AppError("You cannot accept your own invitation", 400);
       }
 
       // Generate unique invite code for the couple
@@ -228,7 +233,8 @@ export class CoupleInvitationRepository {
 
       return await couple.populate("users", "-passwordHash");
     } catch (error: any) {
-      throw new AppError(error.errors.message as string, 500);
+      return error?.message;
+      // throw new AppError("Error when accepting invitation", 500);
     }
   }
 
@@ -262,9 +268,8 @@ export class CoupleInvitationRepository {
       // Update invitation status
       invitation.status = "rejected";
       await invitation.save();
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to reject invitation", 500);
+    } catch (error: any) {
+      return error?.message;
     }
   }
 

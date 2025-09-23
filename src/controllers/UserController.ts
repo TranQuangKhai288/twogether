@@ -1,14 +1,14 @@
 import { Request, Response } from "express";
 import { ApiResponse, PaginatedResponse } from "@/types/index";
 import { AppError } from "@/utils/AppError";
-import { UserRepository } from "@/database/repositories/UserRepository";
+import { UserService } from "@/services/UserService";
 import { asyncHandler } from "@/utils/asyncHandler";
 
 export class UserController {
-  private userRepository: UserRepository;
+  private userService: UserService;
 
   constructor() {
-    this.userRepository = new UserRepository();
+    this.userService = new UserService();
   }
   /**
    * Get all users with pagination
@@ -21,48 +21,37 @@ export class UserController {
       const sortOrder = (req.query.sortOrder as "asc" | "desc") || "desc";
       const search = req.query.search as string;
 
-      // Build filter object
-      const filter: any = {};
-      if (search) {
-        filter.$or = [
-          { name: { $regex: search, $options: "i" } },
-          { email: { $regex: search, $options: "i" } },
-        ];
-      }
-
-      // Get users with pagination
-      const users = await this.userRepository.findUsers(filter, {
+      // Get users with pagination using service
+      const result = await this.userService.getUsersWithPagination({
         page,
         limit,
+        search,
         sortBy,
         sortOrder,
       });
 
-      const total = await this.userRepository.countUsers(filter);
-      const totalPages = Math.ceil(total / limit);
-
       const response: PaginatedResponse<any> = {
         success: true,
         message: "Users retrieved successfully",
-        data: users.map((user) => ({
+        data: result.users.map((user) => ({
           id: user._id,
           email: user.email,
           name: user.name,
           gender: user.gender,
           birthday: user.birthday,
           avatarUrl: user.avatarUrl,
-          coupleId: user.coupleId,
+          coupleId: user.couple,
           preferences: user.preferences,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
         })),
         pagination: {
-          page,
+          page: result.currentPage,
           limit,
-          total,
-          totalPages,
-          hasNext: page < totalPages,
-          hasPrev: page > 1,
+          total: result.total,
+          totalPages: result.totalPages,
+          hasNext: result.currentPage < result.totalPages,
+          hasPrev: result.currentPage > 1,
         },
         timestamp: new Date().toISOString(),
       };
@@ -82,7 +71,7 @@ export class UserController {
         throw new AppError("User ID is required", 400);
       }
 
-      const user = await this.userRepository.findById(id);
+      const user = await this.userService.findUserById(id);
 
       if (!user) {
         throw new AppError("User not found", 404);
@@ -98,7 +87,7 @@ export class UserController {
           gender: user.gender,
           birthday: user.birthday,
           avatarUrl: user.avatarUrl,
-          coupleId: user.coupleId,
+          coupleId: user.couple,
           preferences: user.preferences,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
@@ -126,7 +115,7 @@ export class UserController {
       delete updateData.passwordHash;
       delete updateData._id;
 
-      const updatedUser = await this.userRepository.updateUser(id, updateData);
+      const updatedUser = await this.userService.updateUser(id, updateData);
 
       if (!updatedUser) {
         throw new AppError("User not found", 404);
@@ -142,7 +131,7 @@ export class UserController {
           gender: updatedUser.gender,
           birthday: updatedUser.birthday,
           avatarUrl: updatedUser.avatarUrl,
-          coupleId: updatedUser.coupleId,
+          coupleId: updatedUser.couple,
           preferences: updatedUser.preferences,
           createdAt: updatedUser.createdAt,
           updatedAt: updatedUser.updatedAt,
@@ -166,13 +155,13 @@ export class UserController {
       }
 
       // Check if user exists
-      const user = await this.userRepository.findById(id);
+      const user = await this.userService.findUserById(id);
       if (!user) {
         throw new AppError("User not found", 404);
       }
 
       // Delete user (this will also handle couple relationships)
-      await this.userRepository.deleteUser(id);
+      await this.userService.deleteUser(id);
 
       const response: ApiResponse = {
         success: true,
@@ -201,7 +190,7 @@ export class UserController {
           gender: user!.gender,
           birthday: user!.birthday,
           avatarUrl: user!.avatarUrl,
-          coupleId: user!.coupleId,
+          coupleId: user!.couple,
           preferences: user!.preferences,
           createdAt: user!.createdAt,
           updatedAt: user!.updatedAt,
@@ -227,7 +216,7 @@ export class UserController {
       delete updateData._id;
       delete updateData.coupleId; // Couple linking should be handled separately
 
-      const updatedUser = await this.userRepository.updateUser(
+      const updatedUser = await this.userService.updateUser(
         userId.toString(),
         updateData
       );
@@ -246,7 +235,7 @@ export class UserController {
           gender: updatedUser.gender,
           birthday: updatedUser.birthday,
           avatarUrl: updatedUser.avatarUrl,
-          coupleId: updatedUser.coupleId,
+          coupleId: updatedUser.couple,
           preferences: updatedUser.preferences,
           createdAt: updatedUser.createdAt,
           updatedAt: updatedUser.updatedAt,
@@ -282,7 +271,7 @@ export class UserController {
       }
 
       // Change password
-      await this.userRepository.changePassword(
+      await this.userService.changePassword(
         userId.toString(),
         currentPassword,
         newPassword
@@ -310,7 +299,7 @@ export class UserController {
         throw new AppError("Preferences data is required", 400);
       }
 
-      const updatedUser = await this.userRepository.updatePreferences(
+      const updatedUser = await this.userService.updatePreferences(
         userId.toString(),
         preferences
       );
@@ -339,7 +328,7 @@ export class UserController {
     async (req: Request, res: Response): Promise<void> => {
       const user = req.user!;
 
-      if (!user.coupleId) {
+      if (!user.couple) {
         const response: ApiResponse = {
           success: true,
           message: "User is not in a couple",
@@ -353,7 +342,7 @@ export class UserController {
         return;
       }
 
-      const userWithCouple = await this.userRepository.findById(
+      const userWithCouple = await this.userService.findUserById(
         user._id.toString()
       );
 
@@ -361,8 +350,8 @@ export class UserController {
         success: false,
         message: "Couple information retrieved successfully",
         data: {
-          couple: userWithCouple?.coupleId,
-          isInCouple: !!userWithCouple?.coupleId,
+          couple: userWithCouple?.couple,
+          isInCouple: !!userWithCouple?.couple,
         },
         timestamp: new Date().toISOString(),
       };
@@ -385,40 +374,32 @@ export class UserController {
       const pageNum = parseInt(page as string) || 1;
       const limitNum = parseInt(limit as string) || 10;
 
-      const filter = {
-        $or: [
-          { name: { $regex: searchTerm, $options: "i" } },
-          { email: { $regex: searchTerm, $options: "i" } },
-        ],
-      };
-
-      const users = await this.userRepository.findUsers(filter, {
+      // Use UserService's getUsersWithPagination with search
+      const result = await this.userService.getUsersWithPagination({
         page: pageNum,
         limit: limitNum,
+        search: searchTerm as string,
         sortBy: "name",
         sortOrder: "asc",
       });
 
-      const total = await this.userRepository.countUsers(filter);
-      const totalPages = Math.ceil(total / limitNum);
-
       const response: PaginatedResponse<any> = {
         success: true,
         message: "Users found successfully",
-        data: users.map((user) => ({
+        data: result.users.map((user) => ({
           id: user._id,
           email: user.email,
           name: user.name,
           avatarUrl: user.avatarUrl,
-          isInCouple: !!user.coupleId,
+          isInCouple: !!user.couple,
         })),
         pagination: {
-          page: pageNum,
+          page: result.currentPage,
           limit: limitNum,
-          total,
-          totalPages,
-          hasNext: pageNum < totalPages,
-          hasPrev: pageNum > 1,
+          total: result.total,
+          totalPages: result.totalPages,
+          hasNext: result.currentPage < result.totalPages,
+          hasPrev: result.currentPage > 1,
         },
         timestamp: new Date().toISOString(),
       };

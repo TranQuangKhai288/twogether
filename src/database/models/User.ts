@@ -9,7 +9,7 @@ export interface IUser extends Document {
   gender: "male" | "female" | "other";
   birthday?: Date;
   avatarUrl?: string;
-  coupleId?: Types.ObjectId | null;
+  couple?: Types.ObjectId | null;
   preferences: {
     notifications: boolean;
     darkMode: boolean;
@@ -59,7 +59,7 @@ const userSchema = new Schema<IUser>(
       type: String,
       validate: [validator.isURL, "Please provide a valid URL"],
     },
-    coupleId: {
+    couple: {
       type: Schema.Types.ObjectId,
       ref: "Couple",
       default: null,
@@ -93,7 +93,7 @@ const userSchema = new Schema<IUser>(
 );
 
 // Indexes
-userSchema.index({ coupleId: 1 }); // CoupleId index
+userSchema.index({ couple: 1 }); // Couple index
 userSchema.index({ createdAt: -1 }); // CreatedAt index for sorting
 
 // Virtual for age calculation

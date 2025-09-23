@@ -2,10 +2,10 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { ApiResponse } from "@/types";
 import { AppError } from "@/middleware/errorHandler";
-import { UserRepository } from "@/database/repositories/UserRepository";
+import { UserService } from "@/services/UserService";
 
 export class AuthController {
-  private userRepository = new UserRepository();
+  private userService = new UserService();
 
   /**
    * Generate JWT token
@@ -51,7 +51,7 @@ export class AuthController {
       }
 
       // Create user
-      const user = await this.userRepository.createUser(userData);
+      const user = await this.userService.createUser(userData);
 
       // Generate JWT token
       const token = this.generateToken(user._id.toString());
@@ -97,13 +97,13 @@ export class AuthController {
       }
 
       // Find user by email
-      const user = await this.userRepository.findByEmail(email);
+      const user = await this.userService.findUserByEmail(email);
       if (!user) {
         throw new AppError("Invalid email or password", 401);
       }
 
       // Verify password
-      const isValidPassword = await this.userRepository.verifyPassword(
+      const isValidPassword = await this.userService.verifyUserPassword(
         user,
         password
       );
@@ -125,7 +125,7 @@ export class AuthController {
             gender: user.gender,
             birthday: user.birthday,
             avatarUrl: user.avatarUrl,
-            coupleId: user.coupleId,
+            coupleId: user.couple,
             preferences: user.preferences,
             createdAt: user.createdAt,
           },
