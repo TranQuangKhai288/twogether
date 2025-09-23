@@ -62,13 +62,25 @@ export interface IAnniversaryService {
     userId: string,
     options?: any
   ): Promise<any>;
+  getAnniversaryById(anniversaryId: string, userId: string): Promise<any>;
   updateAnniversary(
     anniversaryId: string,
     userId: string,
     updateData: any
   ): Promise<any>;
   deleteAnniversary(anniversaryId: string, userId: string): Promise<boolean>;
-  getUpcomingAnniversaries(coupleId: string, userId: string): Promise<any>;
+  getUpcomingAnniversaries(
+    coupleId: string,
+    userId: string,
+    days?: number
+  ): Promise<any>;
+  getAnniversariesByDateRange(
+    coupleId: string,
+    userId: string,
+    startDate: Date,
+    endDate: Date
+  ): Promise<any>;
+  getAnniversaryStats(coupleId: string, userId: string): Promise<any>;
 }
 
 // Photo service interface
