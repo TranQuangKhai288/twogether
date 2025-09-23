@@ -1,0 +1,34 @@
+{
+  "preset": "ts-jest",
+  "testEnvironment": "node",
+  "extensionsToTreatAsEsm": [".ts"],
+  "moduleNameMapping": {
+    "^@/(.*)$": "<rootDir>/src/$1",
+    "^@controllers/(.*)$": "<rootDir>/src/controllers/$1",
+    "^@routes/(.*)$": "<rootDir>/src/routes/$1",
+    "^@middleware/(.*)$": "<rootDir>/src/middleware/$1",
+    "^@utils/(.*)$": "<rootDir>/src/utils/$1",
+    "^@types/(.*)$": "<rootDir>/src/types/$1",
+    "^@services/(.*)$": "<rootDir>/src/services/$1"
+  },
+  "transform": {
+    "^.+\\.ts$": ["ts-jest", {
+      "useESM": true
+    }]
+  },
+  "testMatch": [
+    "**/tests/**/*.test.ts",
+    "**/tests/**/*.spec.ts"
+  ],
+  "collectCoverageFrom": [
+    "src/**/*.ts",
+    "!src/**/*.d.ts",
+    "!src/types/**/*"
+  ],
+  "coverageDirectory": "coverage",
+  "coverageReporters": [
+    "text",
+    "lcov",
+    "html"
+  ]
+}
