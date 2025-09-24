@@ -182,15 +182,17 @@ export class CoupleRepository {
   async findWithPagination(
     options: {
       limit?: number;
-      offset?: number;
+      page?: number;
       status?: "dating" | "engaged" | "married";
     } = {}
   ): Promise<{
     couples: ICouple[];
     total: number;
+    currentPage: number;
+    totalPages: number;
   }> {
     try {
-      const { limit = 10, offset = 0, status } = options;
+      const { limit = 10, page = 1, status } = options;
 
       const filter: any = {};
       if (status) {
@@ -200,13 +202,18 @@ export class CoupleRepository {
       const [couples, total] = await Promise.all([
         Couple.find(filter)
           .populate("users", "-passwordHash")
-          .skip(offset)
+          .skip((page - 1) * limit)
           .limit(limit)
           .sort({ createdAt: -1 }),
         Couple.countDocuments(filter),
       ]);
 
-      return { couples, total };
+      return {
+        couples,
+        total,
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+      };
     } catch (error: any) {
       throw new Error(
         `Failed to find couples with pagination: ${error.message}`

@@ -56,6 +56,7 @@ export interface ICoupleService {
   generateNewInviteCode(coupleId: string, userId: string): Promise<any>;
   getPartner(userId: string): Promise<any>;
   getCouples(options?: any): Promise<any>;
+  isUserInCouple(coupleId: string, userId: string): Promise<boolean>;
 }
 
 // Anniversary service interface
@@ -110,10 +111,115 @@ export interface IPhotoService {
 
 // Mood service interface
 export interface IMoodService {
-  createMood(coupleId: string, userId: string, moodData: any): Promise<any>;
-  getCoupleMoods(coupleId: string, userId: string, options?: any): Promise<any>;
-  updateMood(moodId: string, userId: string, updateData: any): Promise<any>;
+  createMood(
+    coupleId: string,
+    userId: string,
+    moodData: {
+      mood: string;
+      note?: string;
+    }
+  ): Promise<any>;
+
+  getLatestMoodForUser(
+    coupleId: string,
+    targetUserId: string,
+    requestUserId: string
+  ): Promise<any>;
+
+  getMoodHistory(
+    coupleId: string,
+    userId: string,
+    options?: {
+      targetUserId?: string;
+      startDate?: Date;
+      endDate?: Date;
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<{
+    moods: any[];
+    total: number;
+  }>;
+
+  getMoodById(moodId: string, userId: string): Promise<any>;
+
+  updateMood(
+    moodId: string,
+    userId: string,
+    updateData: {
+      mood?: string;
+      note?: string;
+    }
+  ): Promise<any>;
+
   deleteMood(moodId: string, userId: string): Promise<boolean>;
+
+  getMoodStats(
+    coupleId: string,
+    userId: string,
+    options?: {
+      targetUserId?: string;
+      startDate?: Date;
+      endDate?: Date;
+    }
+  ): Promise<any>;
+
+  getMoodTrends(
+    coupleId: string,
+    userId: string,
+    options: {
+      targetUserId?: string;
+      period: "week" | "month" | "year";
+      startDate?: Date;
+      endDate?: Date;
+    }
+  ): Promise<any>;
+
+  getCurrentMoodStatus(coupleId: string, userId: string): Promise<any>;
+}
+
+// Note service interface
+export interface INoteService {
+  createNote(noteData: {
+    coupleId: string;
+    authorId: string;
+    content: string;
+    tags?: string[];
+    isPrivate?: boolean;
+  }): Promise<any>;
+
+  getNotesByCouple(
+    coupleId: string,
+    userId: string,
+    page?: number,
+    limit?: number,
+    tags?: string[],
+    searchTerm?: string
+  ): Promise<any>;
+
+  getNoteById(noteId: string, userId: string): Promise<any>;
+
+  updateNote(
+    noteId: string,
+    userId: string,
+    updateData: {
+      content?: string;
+      tags?: string[];
+      isPrivate?: boolean;
+    }
+  ): Promise<any>;
+
+  deleteNote(noteId: string, userId: string): Promise<void>;
+
+  getTagsByCouple(coupleId: string): Promise<string[]>;
+
+  searchNotes(
+    coupleId: string,
+    userId: string,
+    searchTerm: string,
+    page?: number,
+    limit?: number
+  ): Promise<any>;
 }
 
 // Location service interface
@@ -152,10 +258,84 @@ export interface ICoupleInvitationService {
   deleteInvitation(invitationId: string, userId: string): Promise<boolean>;
 }
 
-// Note service interface
-export interface INoteService {
-  createNote(coupleId: string, userId: string, noteData: any): Promise<any>;
-  getCoupleNotes(coupleId: string, userId: string, options?: any): Promise<any>;
-  updateNote(noteId: string, userId: string, updateData: any): Promise<any>;
-  deleteNote(noteId: string, userId: string): Promise<boolean>;
+// Photo service interface
+export interface IPhotoService {
+  uploadPhoto(
+    coupleId: string,
+    uploaderId: string,
+    photoData: {
+      url: string;
+      caption?: string;
+      isFavorite?: boolean;
+    }
+  ): Promise<any>;
+
+  getCouplePhotos(
+    coupleId: string,
+    userId: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      sortBy?: "createdAt" | "isFavorite";
+      sortOrder?: "asc" | "desc";
+    }
+  ): Promise<{
+    photos: any[];
+    total: number;
+  }>;
+
+  getPhotoById(photoId: string, userId: string): Promise<any>;
+
+  updatePhoto(
+    photoId: string,
+    userId: string,
+    updateData: {
+      caption?: string;
+      isFavorite?: boolean;
+    }
+  ): Promise<any>;
+
+  deletePhoto(photoId: string, userId: string): Promise<boolean>;
+
+  togglePhotoFavorite(photoId: string, userId: string): Promise<any>;
+
+  getFavoritePhotos(
+    coupleId: string,
+    userId: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<{
+    photos: any[];
+    total: number;
+  }>;
+
+  getPhotosByUploader(
+    coupleId: string,
+    uploaderId: string,
+    userId: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<{
+    photos: any[];
+    total: number;
+  }>;
+
+  getPhotoStats(coupleId: string, userId: string): Promise<any>;
+
+  searchPhotos(
+    coupleId: string,
+    userId: string,
+    searchQuery: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<{
+    photos: any[];
+    total: number;
+  }>;
 }

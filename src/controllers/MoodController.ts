@@ -1,10 +1,15 @@
 import { Request, Response } from "express";
 import { ApiResponse } from "../types/index";
 import { AppError } from "../utils/AppError";
-import { MoodRepository } from "../database/repositories/MoodRepository";
+import { MoodService } from "../services/MoodService";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export class MoodController {
+  private moodService: MoodService;
+
+  constructor() {
+    this.moodService = new MoodService();
+  }
   /**
    * Create a new mood entry
    */
@@ -17,7 +22,7 @@ export class MoodController {
         throw new AppError("Couple ID and mood are required", 400);
       }
 
-      const moodEntry = await MoodRepository.createMood(coupleId, userId, {
+      const moodEntry = await this.moodService.createMood(coupleId, userId, {
         mood,
         note,
       });
@@ -48,7 +53,7 @@ export class MoodController {
       const requestUserId = req.user!._id.toString();
       const { coupleId, userId } = req.params;
 
-      const mood = await MoodRepository.getLatestMoodForUser(
+      const mood = await this.moodService.getLatestMoodForUser(
         coupleId,
         userId,
         requestUserId
@@ -91,7 +96,7 @@ export class MoodController {
         targetUserId: targetUserId as string,
       };
 
-      const result = await MoodRepository.getMoodHistory(
+      const result = await this.moodService.getMoodHistory(
         coupleId,
         userId,
         options
@@ -101,7 +106,7 @@ export class MoodController {
         success: true,
         message: "Mood history retrieved successfully",
         data: {
-          moods: result.moods.map((mood) => ({
+          moods: result.moods.map((mood: any) => ({
             id: mood._id,
             coupleId: mood.coupleId,
             user: mood.userId,
@@ -126,7 +131,7 @@ export class MoodController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      const mood = await MoodRepository.getMoodById(id, userId);
+      const mood = await this.moodService.getMoodById(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -159,7 +164,7 @@ export class MoodController {
       if (mood !== undefined) updateData.mood = mood;
       if (note !== undefined) updateData.note = note;
 
-      const updatedMood = await MoodRepository.updateMood(
+      const updatedMood = await this.moodService.updateMood(
         id,
         userId,
         updateData
@@ -191,7 +196,7 @@ export class MoodController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      await MoodRepository.deleteMood(id, userId);
+      await this.moodService.deleteMood(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -219,7 +224,7 @@ export class MoodController {
         targetUserId: targetUserId as string,
       };
 
-      const stats = await MoodRepository.getMoodStats(
+      const stats = await this.moodService.getMoodStats(
         coupleId,
         userId,
         options
@@ -254,7 +259,7 @@ export class MoodController {
         targetUserId: targetUserId as string,
       };
 
-      const trends = await MoodRepository.getMoodTrends(
+      const trends = await this.moodService.getMoodTrends(
         coupleId,
         userId,
         options
@@ -286,32 +291,16 @@ export class MoodController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      const status = await MoodRepository.getCurrentMoodStatus(
+      const status = await this.moodService.getCurrentMoodStatus(
         coupleId,
         userId
       );
 
-      // Transform the data to be more user-friendly
-      const transformedStatus = Object.entries(status).map(
-        ([userId, data]) => ({
-          userId,
-          latestMood: data.latestMood
-            ? {
-                id: data.latestMood._id,
-                mood: data.latestMood.mood,
-                note: data.latestMood.note,
-                createdAt: data.latestMood.createdAt,
-                user: data.latestMood.userId,
-              }
-            : null,
-          todayMoodCount: data.todayMoodCount,
-        })
-      );
-
+      // Return status directly from service
       const response: ApiResponse = {
         success: true,
         message: "Current mood status retrieved successfully",
-        data: transformedStatus,
+        data: status,
         timestamp: new Date().toISOString(),
       };
 

@@ -2,17 +2,17 @@ import bcrypt from "bcryptjs";
 import { Types } from "mongoose";
 import { IUser } from "@/database/models/User";
 import { UserRepository } from "@/database/repositories/UserRepository";
-import { CoupleRepository } from "@/database/repositories/CoupleRepository";
+// import { CoupleRepository } from "@/database/repositories/CoupleRepository";
 import { IUserService } from "./interfaces";
 import { AppError } from "@/utils/AppError";
 
 export class UserService implements IUserService {
   private userRepository: UserRepository;
-  private coupleRepository: CoupleRepository;
+  // private coupleRepository: CoupleRepository;
 
   constructor() {
     this.userRepository = new UserRepository();
-    this.coupleRepository = new CoupleRepository();
+    // this.coupleRepository = new CoupleRepository();
   }
 
   /**
@@ -213,10 +213,11 @@ export class UserService implements IUserService {
 
     // Business logic: Handle couple relationship before deletion
     if (user.couple) {
-      await this.coupleRepository.removeUserFromCouple(
-        user.couple.toString(),
-        userId
-      );
+      // TODO: Implement couple cleanup logic
+      // await this.coupleRepository.removeUserFromCouple(
+      //   user.couple.toString(),
+      //   userId
+      // );
     }
 
     return await this.userRepository.delete(userId);

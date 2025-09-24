@@ -1,222 +1,152 @@
 import { Types } from "mongoose";
 import { Note, INote } from "../models/Note";
-import { AppError } from "@/middleware/errorHandler";
-import { CoupleRepository } from "./CoupleRepository";
 
 export class NoteRepository {
-  private coupleService = new CoupleRepository();
-
   /**
    * Create a new note
    */
-  async createNote(noteData: {
-    coupleId: string | Types.ObjectId;
-    authorId: string | Types.ObjectId;
+  async create(noteData: {
+    coupleId: string;
+    authorId: string;
     content: string;
     tags?: string[];
     isPrivate?: boolean;
   }): Promise<INote> {
-    try {
-      // Verify user belongs to couple
-      const isUserInCouple = await this.coupleService.isUserInCouple(
-        noteData.coupleId,
-        noteData.authorId
-      );
-      if (!isUserInCouple) {
-        throw new AppError("User does not belong to this couple", 403);
-      }
+    const note = new Note({
+      coupleId: new Types.ObjectId(noteData.coupleId),
+      authorId: new Types.ObjectId(noteData.authorId),
+      content: noteData.content,
+      tags: noteData.tags || [],
+      isPrivate: noteData.isPrivate || false,
+    });
 
-      const note = new Note(noteData);
-      await note.save();
-
-      return await note.populate("authorId", "name avatarUrl");
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to create note", 500);
-    }
+    await note.save();
+    return await note.populate("authorId", "name avatarUrl");
   }
 
   /**
-   * Get notes for a couple
+   * Find note by ID
    */
-  async getNotesByCouple(
-    coupleId: string | Types.ObjectId,
-    userId: string | Types.ObjectId,
-    page: number = 1,
-    limit: number = 20,
-    tags?: string[],
-    searchTerm?: string
+  async findById(noteId: string): Promise<INote | null> {
+    if (!Types.ObjectId.isValid(noteId)) {
+      return null;
+    }
+    return await Note.findById(noteId).populate("authorId", "name avatarUrl");
+  }
+
+  /**
+   * Find notes by filters with pagination
+   */
+  async findByFilters(
+    filters: {
+      coupleId: string;
+      userId: string;
+    },
+    options: {
+      page?: number;
+      limit?: number;
+      tags?: string[];
+      searchTerm?: string;
+    } = {}
   ): Promise<{
     notes: INote[];
     total: number;
     totalPages: number;
     currentPage: number;
   }> {
-    try {
-      // Verify user belongs to couple
-      const isUserInCouple = await this.coupleService.isUserInCouple(
-        coupleId,
-        userId
-      );
-      if (!isUserInCouple) {
-        throw new AppError("User does not belong to this couple", 403);
-      }
+    const { page = 1, limit = 20, tags, searchTerm } = options;
+    const skip = (page - 1) * limit;
 
-      const skip = (page - 1) * limit;
+    // Build query
+    let query: any = { coupleId: new Types.ObjectId(filters.coupleId) };
 
-      // Build query
-      let query: any = { coupleId };
+    // Show private notes only to their authors
+    query.$or = [
+      { isPrivate: false },
+      { isPrivate: true, authorId: new Types.ObjectId(filters.userId) },
+    ];
 
-      // Show private notes only to their authors
-      query.$or = [{ isPrivate: false }, { isPrivate: true, authorId: userId }];
-
-      // Filter by tags if provided
-      if (tags && tags.length > 0) {
-        query.tags = { $in: tags };
-      }
-
-      // Search in content if search term provided
-      if (searchTerm) {
-        query.$text = { $search: searchTerm };
-      }
-
-      const [notes, total] = await Promise.all([
-        Note.find(query)
-          .populate("authorId", "name avatarUrl")
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limit),
-        Note.countDocuments(query),
-      ]);
-
-      return {
-        notes,
-        total,
-        totalPages: Math.ceil(total / limit),
-        currentPage: page,
-      };
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to get notes", 500);
+    // Filter by tags if provided
+    if (tags && tags.length > 0) {
+      query.tags = { $in: tags };
     }
+
+    // Search in content if search term provided
+    if (searchTerm) {
+      query.$text = { $search: searchTerm };
+    }
+
+    const [notes, total] = await Promise.all([
+      Note.find(query)
+        .populate("authorId", "name avatarUrl")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Note.countDocuments(query),
+    ]);
+
+    return {
+      notes,
+      total,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+    };
   }
 
   /**
-   * Get note by ID
+   * Update note by ID
    */
-  async getNoteById(
-    noteId: string | Types.ObjectId,
-    userId: string | Types.ObjectId
-  ): Promise<INote | null> {
-    try {
-      const note = await Note.findById(noteId).populate(
-        "authorId",
-        "name avatarUrl"
-      );
-      if (!note) {
-        throw new AppError("Note not found", 404);
-      }
-
-      // Verify user belongs to couple
-      const isUserInCouple = await this.coupleService.isUserInCouple(
-        note.coupleId,
-        userId
-      );
-      if (!isUserInCouple) {
-        throw new AppError("User does not belong to this couple", 403);
-      }
-
-      // Check if user can view private note
-      if (note.isPrivate && !note.authorId.equals(userId)) {
-        throw new AppError("Access denied to private note", 403);
-      }
-
-      return note;
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to get note", 500);
-    }
-  }
-
-  /**
-   * Update note
-   */
-  async updateNote(
-    noteId: string | Types.ObjectId,
-    userId: string | Types.ObjectId,
+  async update(
+    noteId: string,
     updateData: {
       content?: string;
       tags?: string[];
       isPrivate?: boolean;
     }
   ): Promise<INote | null> {
-    try {
-      const note = await Note.findById(noteId);
-      if (!note) {
-        throw new AppError("Note not found", 404);
-      }
-
-      // Only author can update their note
-      if (!note.authorId.equals(userId)) {
-        throw new AppError("Only the author can update this note", 403);
-      }
-
-      const updatedNote = await Note.findByIdAndUpdate(
-        noteId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      ).populate("authorId", "name avatarUrl");
-
-      return updatedNote;
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to update note", 500);
+    if (!Types.ObjectId.isValid(noteId)) {
+      return null;
     }
+
+    return await Note.findByIdAndUpdate(
+      noteId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).populate("authorId", "name avatarUrl");
   }
 
   /**
-   * Delete note
+   * Delete note by ID
    */
-  async deleteNote(
-    noteId: string | Types.ObjectId,
-    userId: string | Types.ObjectId
-  ): Promise<void> {
-    try {
-      const note = await Note.findById(noteId);
-      if (!note) {
-        throw new AppError("Note not found", 404);
-      }
-
-      // Only author can delete their note
-      if (!note.authorId.equals(userId)) {
-        throw new AppError("Only the author can delete this note", 403);
-      }
-
-      await Note.findByIdAndDelete(noteId);
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to delete note", 500);
+  async delete(noteId: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(noteId)) {
+      return false;
     }
+
+    const result = await Note.findByIdAndDelete(noteId);
+    return !!result;
   }
 
   /**
-   * Get all tags used by a couple
+   * Get distinct tags by couple ID
    */
-  async getTagsByCouple(coupleId: string | Types.ObjectId): Promise<string[]> {
-    try {
-      const tags = await Note.distinct("tags", { coupleId });
-      return tags.sort();
-    } catch (error) {
-      throw new AppError("Failed to get tags", 500);
+  async getDistinctTags(coupleId: string): Promise<string[]> {
+    if (!Types.ObjectId.isValid(coupleId)) {
+      return [];
     }
+
+    const tags = await Note.distinct("tags", {
+      coupleId: new Types.ObjectId(coupleId),
+    });
+    return tags.sort();
   }
 
   /**
-   * Search notes
+   * Search notes with text search
    */
   async searchNotes(
-    coupleId: string | Types.ObjectId,
-    userId: string | Types.ObjectId,
+    coupleId: string,
+    userId: string,
     searchTerm: string,
     page: number = 1,
     limit: number = 20
@@ -226,42 +156,49 @@ export class NoteRepository {
     totalPages: number;
     currentPage: number;
   }> {
-    try {
-      // Verify user belongs to couple
-      const isUserInCouple = await this.coupleService.isUserInCouple(
-        coupleId,
-        userId
-      );
-      if (!isUserInCouple) {
-        throw new AppError("User does not belong to this couple", 403);
-      }
+    const skip = (page - 1) * limit;
 
-      const skip = (page - 1) * limit;
+    const query = {
+      coupleId: new Types.ObjectId(coupleId),
+      $or: [
+        { isPrivate: false },
+        { isPrivate: true, authorId: new Types.ObjectId(userId) },
+      ],
+      $text: { $search: searchTerm },
+    };
 
-      const query = {
-        coupleId,
-        $or: [{ isPrivate: false }, { isPrivate: true, authorId: userId }],
-        $text: { $search: searchTerm },
-      };
+    const [notes, total] = await Promise.all([
+      Note.find(query, { score: { $meta: "textScore" } })
+        .populate("authorId", "name avatarUrl")
+        .sort({ score: { $meta: "textScore" }, createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Note.countDocuments(query),
+    ]);
 
-      const [notes, total] = await Promise.all([
-        Note.find(query, { score: { $meta: "textScore" } })
-          .populate("authorId", "name avatarUrl")
-          .sort({ score: { $meta: "textScore" }, createdAt: -1 })
-          .skip(skip)
-          .limit(limit),
-        Note.countDocuments(query),
-      ]);
+    return {
+      notes,
+      total,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+    };
+  }
 
-      return {
-        notes,
-        total,
-        totalPages: Math.ceil(total / limit),
-        currentPage: page,
-      };
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("Failed to search notes", 500);
+  /**
+   * Count notes by filters
+   */
+  async countByFilters(filters: any): Promise<number> {
+    return await Note.countDocuments(filters);
+  }
+
+  /**
+   * Check if note exists
+   */
+  async exists(noteId: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(noteId)) {
+      return false;
     }
+    const note = await Note.findById(noteId).select("_id");
+    return !!note;
   }
 }

@@ -1,10 +1,15 @@
 import { Request, Response } from "express";
 import { ApiResponse } from "../types/index";
 import { AppError } from "../utils/AppError";
-import { PhotoRepository } from "../database/repositories/PhotoRepository";
+import { PhotoService } from "../services/PhotoService";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export class PhotoController {
+  private photoService: PhotoService;
+
+  constructor() {
+    this.photoService = new PhotoService();
+  }
   /**
    * Upload a new photo
    */
@@ -17,7 +22,7 @@ export class PhotoController {
         throw new AppError("Couple ID and photo URL are required", 400);
       }
 
-      const photo = await PhotoRepository.uploadPhoto(coupleId, uploaderId, {
+      const photo = await this.photoService.uploadPhoto(coupleId, uploaderId, {
         url,
         caption,
         isFavorite,
@@ -49,17 +54,16 @@ export class PhotoController {
     async (req: Request, res: Response): Promise<void> => {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
-      const { favoritesOnly, uploaderId, limit, offset, sortBy } = req.query;
+      const { limit, offset, sortBy } = req.query;
 
       const options = {
-        favoritesOnly: favoritesOnly === "true",
-        uploaderId: uploaderId as string,
         limit: limit ? parseInt(limit as string) : undefined,
         offset: offset ? parseInt(offset as string) : undefined,
-        sortBy: (sortBy as "newest" | "oldest") || "newest",
+        sortBy: (sortBy as "createdAt" | "isFavorite") || "createdAt",
+        sortOrder: "desc" as const,
       };
 
-      const result = await PhotoRepository.getCouplePhotos(
+      const result = await this.photoService.getCouplePhotos(
         coupleId,
         userId,
         options
@@ -69,7 +73,7 @@ export class PhotoController {
         success: true,
         message: "Photos retrieved successfully",
         data: {
-          photos: result.photos.map((photo) => ({
+          photos: result.photos.map((photo: any) => ({
             id: photo._id,
             coupleId: photo.coupleId,
             uploader: photo.uploaderId,
@@ -79,7 +83,6 @@ export class PhotoController {
             createdAt: photo.createdAt,
           })),
           total: result.total,
-          favoritesCount: result.favoritesCount,
         },
         timestamp: new Date().toISOString(),
       };
@@ -96,7 +99,7 @@ export class PhotoController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      const photo = await PhotoRepository.getPhotoById(id, userId);
+      const photo = await this.photoService.getPhotoById(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -130,7 +133,7 @@ export class PhotoController {
       if (caption !== undefined) updateData.caption = caption;
       if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
 
-      const photo = await PhotoRepository.updatePhoto(id, userId, updateData);
+      const photo = await this.photoService.updatePhoto(id, userId, updateData);
 
       const response: ApiResponse = {
         success: true,
@@ -159,7 +162,7 @@ export class PhotoController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      await PhotoRepository.deletePhoto(id, userId);
+      await this.photoService.deletePhoto(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -180,7 +183,7 @@ export class PhotoController {
       const userId = req.user!._id.toString();
       const { id } = req.params;
 
-      const photo = await PhotoRepository.toggleFavorite(id, userId);
+      const photo = await this.photoService.togglePhotoFavorite(id, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -215,7 +218,7 @@ export class PhotoController {
         offset: offset ? parseInt(offset as string) : undefined,
       };
 
-      const result = await PhotoRepository.getFavoritePhotos(
+      const result = await this.photoService.getFavoritePhotos(
         coupleId,
         userId,
         options
@@ -225,7 +228,7 @@ export class PhotoController {
         success: true,
         message: "Favorite photos retrieved successfully",
         data: {
-          photos: result.photos.map((photo) => ({
+          photos: result.photos.map((photo: any) => ({
             id: photo._id,
             coupleId: photo.coupleId,
             uploader: photo.uploaderId,
@@ -257,7 +260,7 @@ export class PhotoController {
         offset: offset ? parseInt(offset as string) : undefined,
       };
 
-      const result = await PhotoRepository.getPhotosByUploader(
+      const result = await this.photoService.getPhotosByUploader(
         coupleId,
         uploaderId,
         userId,
@@ -268,7 +271,7 @@ export class PhotoController {
         success: true,
         message: "Photos by uploader retrieved successfully",
         data: {
-          photos: result.photos.map((photo) => ({
+          photos: result.photos.map((photo: any) => ({
             id: photo._id,
             coupleId: photo.coupleId,
             uploader: photo.uploaderId,
@@ -294,7 +297,7 @@ export class PhotoController {
       const userId = req.user!._id.toString();
       const { coupleId } = req.params;
 
-      const stats = await PhotoRepository.getPhotoStats(coupleId, userId);
+      const stats = await this.photoService.getPhotoStats(coupleId, userId);
 
       const response: ApiResponse = {
         success: true,
@@ -325,7 +328,7 @@ export class PhotoController {
         offset: offset ? parseInt(offset as string) : undefined,
       };
 
-      const result = await PhotoRepository.searchPhotos(
+      const result = await this.photoService.searchPhotos(
         coupleId,
         userId,
         searchTerm as string,
@@ -336,7 +339,7 @@ export class PhotoController {
         success: true,
         message: "Photo search completed successfully",
         data: {
-          photos: result.photos.map((photo) => ({
+          photos: result.photos.map((photo: any) => ({
             id: photo._id,
             coupleId: photo.coupleId,
             uploader: photo.uploaderId,

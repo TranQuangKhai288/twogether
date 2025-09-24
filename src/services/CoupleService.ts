@@ -402,14 +402,27 @@ export class CoupleService implements ICoupleService {
   async getCouples(
     options: {
       limit?: number;
-      offset?: number;
+      page?: number;
       status?: "dating" | "engaged" | "married";
     } = {}
   ): Promise<{
     couples: ICouple[];
     total: number;
+    currentPage: number;
+    totalPages: number;
   }> {
     return await this.coupleRepository.findWithPagination(options);
+  }
+
+  /**
+   * Check if user belongs to couple
+   */
+  async isUserInCouple(coupleId: string, userId: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(coupleId) || !Types.ObjectId.isValid(userId)) {
+      return false;
+    }
+
+    return await this.coupleRepository.isUserInCouple(coupleId, userId);
   }
 
   /**
