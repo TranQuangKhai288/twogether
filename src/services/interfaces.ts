@@ -40,7 +40,7 @@ export interface ICoupleService {
     relationshipStatus?: string
   ): Promise<any>;
   joinCoupleByInviteCode(userId: string, inviteCode: string): Promise<any>;
-  getCoupleById(coupleId: string): Promise<any>;
+  getCoupleById(coupleId: string, userId: string): Promise<any>;
   updateCoupleSettings(
     coupleId: string,
     userId: string,
@@ -48,6 +48,14 @@ export interface ICoupleService {
   ): Promise<any>;
   leaveCoupleAsPartner(coupleId: string, userId: string): Promise<boolean>;
   getCoupleByUserId(userId: string): Promise<any>;
+  updateAnniversaryDate(
+    coupleId: string,
+    userId: string,
+    anniversaryDate: Date
+  ): Promise<any>;
+  generateNewInviteCode(coupleId: string, userId: string): Promise<any>;
+  getPartner(userId: string): Promise<any>;
+  getCouples(options?: any): Promise<any>;
 }
 
 // Anniversary service interface
