@@ -29,11 +29,7 @@ const updateNoteRules = {
  * @desc    Create a new note
  * @access  Private
  */
-router.post(
-  "/",
-  validateBody(createNoteRules),
-  noteController.createNote
-);
+router.post("/", validateBody(createNoteRules), noteController.createNote);
 
 /**
  * @route   GET /api/notes
@@ -70,11 +66,7 @@ router.get("/:id", noteController.getNoteById);
  * @desc    Update note
  * @access  Private (only author)
  */
-router.put(
-  "/:id",
-  validateBody(updateNoteRules),
-  noteController.updateNote
-);
+router.put("/:id", validateBody(updateNoteRules), noteController.updateNote);
 
 /**
  * @route   DELETE /api/notes/:id

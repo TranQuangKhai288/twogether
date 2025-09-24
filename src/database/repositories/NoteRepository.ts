@@ -8,6 +8,7 @@ export class NoteRepository {
   async create(noteData: {
     coupleId: string;
     authorId: string;
+    title: string;
     content: string;
     tags?: string[];
     isPrivate?: boolean;
@@ -15,6 +16,7 @@ export class NoteRepository {
     const note = new Note({
       coupleId: new Types.ObjectId(noteData.coupleId),
       authorId: new Types.ObjectId(noteData.authorId),
+      title: noteData.title,
       content: noteData.content,
       tags: noteData.tags || [],
       isPrivate: noteData.isPrivate || false,
@@ -45,6 +47,7 @@ export class NoteRepository {
     options: {
       page?: number;
       limit?: number;
+      title?: string;
       tags?: string[];
       searchTerm?: string;
     } = {}
@@ -99,6 +102,7 @@ export class NoteRepository {
   async update(
     noteId: string,
     updateData: {
+      title?: string;
       content?: string;
       tags?: string[];
       isPrivate?: boolean;

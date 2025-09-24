@@ -17,11 +17,16 @@ export class NoteService implements INoteService {
   async createNote(noteData: {
     coupleId: string;
     authorId: string;
+    title: string;
     content: string;
     tags?: string[];
     isPrivate?: boolean;
   }): Promise<INote> {
     // Validate required fields
+    if (!noteData.title?.trim()) {
+      throw new AppError("Note title is required", 400);
+    }
+
     if (!noteData.content?.trim()) {
       throw new AppError("Note content is required", 400);
     }
@@ -60,6 +65,7 @@ export class NoteService implements INoteService {
     return await this.noteRepository.create({
       coupleId: noteData.coupleId,
       authorId: noteData.authorId,
+      title: noteData.title.trim(),
       content: noteData.content.trim(),
       tags,
       isPrivate: noteData.isPrivate || false,
@@ -159,6 +165,7 @@ export class NoteService implements INoteService {
     noteId: string,
     userId: string,
     updateData: {
+      title?: string;
       content?: string;
       tags?: string[];
       isPrivate?: boolean;
@@ -183,6 +190,15 @@ export class NoteService implements INoteService {
     }
 
     // Validate content if provided
+    if (updateData.title !== undefined) {
+      if (!updateData.title.trim()) {
+        throw new AppError("Note title cannot be empty", 400);
+      }
+      if (updateData.title.length > 100) {
+        throw new AppError("Note title cannot exceed 100 characters", 400);
+      }
+      updateData.title = updateData.title.trim();
+    }
     if (updateData.content !== undefined) {
       if (!updateData.content.trim()) {
         throw new AppError("Note content cannot be empty", 400);

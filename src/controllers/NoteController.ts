@@ -25,18 +25,19 @@ export class NoteController {
       throw new AppError("Authentication required", 401);
     }
 
-    const { coupleId, content, tags, isPrivate } = req.body;
+    const { coupleId, title, content, tags, isPrivate } = req.body;
 
-    if (!coupleId || !content) {
-      throw new AppError("Couple ID and content are required", 400);
+    if (!coupleId || !title || !content) {
+      throw new AppError("Couple ID, title, and content are required", 400);
     }
 
     const note = await this.noteService.createNote({
       coupleId,
       authorId: userId,
-      content,
-      tags,
-      isPrivate,
+      title: title,
+      content: content,
+      tags: tags,
+      isPrivate: isPrivate,
     });
 
     return sendSuccess(res, "Note created successfully", note, 201);
@@ -163,15 +164,12 @@ export class NoteController {
       throw new AppError("Couple ID and search query are required", 400);
     }
 
-    const pageNum = parseInt(page as string) || 1;
-    const limitNum = parseInt(limit as string) || 20;
-
     const result = await this.noteService.searchNotes(
       coupleId as string,
       userId,
       q as string,
-      pageNum,
-      limitNum
+      page as unknown as number,
+      limit as unknown as number
     );
 
     return sendSuccess(res, "Search completed successfully", result);
