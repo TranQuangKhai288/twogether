@@ -1,9 +1,10 @@
 import { Types } from "mongoose";
-import { INote } from "@/database/models/Note";
+import { INote, NoteType } from "@/database/models/Note";
 import { NoteRepository } from "@/database/repositories/NoteRepository";
 import { CoupleService } from "./CoupleService";
 import { INoteService } from "./interfaces";
 import { AppError } from "@/utils/AppError";
+import { notificationService } from "./NotificationService";
 
 export class NoteService implements INoteService {
   constructor(
@@ -20,7 +21,10 @@ export class NoteService implements INoteService {
     title: string;
     content: string;
     tags?: string[];
+    type?: NoteType;
     isPrivate?: boolean;
+    reminderDate?: Date;
+    notificationEnabled?: boolean;
   }): Promise<INote> {
     // Validate required fields
     if (!noteData.title?.trim()) {
@@ -62,14 +66,63 @@ export class NoteService implements INoteService {
         .slice(0, 10); // Limit to 10 tags
     }
 
-    return await this.noteRepository.create({
+    // Validate notification settings
+    const noteType = noteData.type || NoteType.GENERAL;
+    let reminderDate = noteData.reminderDate;
+    let notificationEnabled = noteData.notificationEnabled;
+
+    // Auto-enable notifications for certain types
+    if (
+      noteType === NoteType.REMINDER ||
+      noteType === NoteType.DATE ||
+      noteType === NoteType.IMPORTANT
+    ) {
+      if (notificationEnabled === undefined) {
+        notificationEnabled = true;
+      }
+    } else {
+      notificationEnabled = notificationEnabled || false;
+    }
+
+    // Validate reminder date for reminder and date types
+    if (
+      (noteType === NoteType.REMINDER || noteType === NoteType.DATE) &&
+      !reminderDate
+    ) {
+      throw new AppError(
+        "Reminder date is required for reminder and date type notes",
+        400
+      );
+    }
+
+    if (reminderDate && new Date(reminderDate) < new Date()) {
+      throw new AppError("Reminder date cannot be in the past", 400);
+    }
+
+    const note = await this.noteRepository.create({
       coupleId: noteData.coupleId,
       authorId: noteData.authorId,
       title: noteData.title.trim(),
       content: noteData.content.trim(),
       tags,
+      type: noteType,
       isPrivate: noteData.isPrivate || false,
+      reminderDate,
+      notificationEnabled,
+      notificationSent: false,
     });
+
+    // If this is a notification-enabled note, we might want to schedule it
+    if (notificationEnabled && reminderDate) {
+      // In a production environment, you might want to schedule this
+      // For now, we'll rely on periodic checks
+      await notificationService.updateNoteNotificationSettings(note._id, {
+        notificationEnabled,
+        reminderDate,
+      });
+    }
+
+    return note;
   }
 
   /**
@@ -307,5 +360,89 @@ export class NoteService implements INoteService {
       page,
       limit
     );
+  }
+
+  /**
+   * Update notification settings for a note
+   */
+  async updateNotificationSettings(
+    noteId: string,
+    userId: string,
+    settings: {
+      notificationEnabled?: boolean;
+      reminderDate?: Date;
+    }
+  ): Promise<INote> {
+    // Validate inputs
+    if (!Types.ObjectId.isValid(noteId)) {
+      throw new AppError("Invalid note ID", 400);
+    }
+
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new AppError("Invalid user ID", 400);
+    }
+
+    // Find the note
+    const note = await this.noteRepository.findById(noteId);
+    if (!note) {
+      throw new AppError("Note not found", 404);
+    }
+
+    // Verify user belongs to the couple
+    const isUserInCouple = await this.coupleService.isUserInCouple(
+      note.coupleId.toString(),
+      userId
+    );
+    if (!isUserInCouple) {
+      throw new AppError("User does not belong to this couple", 403);
+    }
+
+    // Validate reminder date if provided
+    if (settings.reminderDate && new Date(settings.reminderDate) < new Date()) {
+      throw new AppError("Reminder date cannot be in the past", 400);
+    }
+
+    // Update the note via NotificationService
+    await notificationService.updateNoteNotificationSettings(
+      new Types.ObjectId(noteId),
+      settings
+    );
+
+    // Return updated note
+    return (await this.noteRepository.findById(noteId)) as INote;
+  }
+
+  /**
+   * Get notes with pending notifications for a couple
+   */
+  async getNotesWithPendingNotifications(
+    coupleId: string,
+    userId: string
+  ): Promise<INote[]> {
+    // Validate inputs
+    if (!Types.ObjectId.isValid(coupleId)) {
+      throw new AppError("Invalid couple ID", 400);
+    }
+
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new AppError("Invalid user ID", 400);
+    }
+
+    // Verify user belongs to couple
+    const isUserInCouple = await this.coupleService.isUserInCouple(
+      coupleId,
+      userId
+    );
+    if (!isUserInCouple) {
+      throw new AppError("User does not belong to this couple", 403);
+    }
+
+    // Get pending notifications from notification service
+    const pendingNotifications =
+      await notificationService.getPendingNotifications(
+        new Types.ObjectId(coupleId)
+      );
+
+    return pendingNotifications.notes;
   }
 }

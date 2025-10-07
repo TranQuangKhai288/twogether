@@ -8,5 +8,9 @@ export { AnniversaryService } from "./AnniversaryService";
 export { PhotoService } from "./PhotoService";
 export { MoodService } from "./MoodService";
 export { NoteService } from "./NoteService";
+export {
+  NotificationService,
+  notificationService,
+} from "./NotificationService";
 // export { LocationService } from './LocationService';
 // export { CoupleInvitationService } from './CoupleInvitationService';

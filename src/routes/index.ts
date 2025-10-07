@@ -7,6 +7,7 @@ import photoRoutes from "./photoRoutes";
 import moodRoutes from "./moodRoutes";
 import locationRoutes from "./locationRoutes";
 import noteRoutes from "./noteRoutes";
+import notificationRoutes from "./notificationRoutes";
 
 const router = Router();
 
@@ -27,6 +28,7 @@ router.get("/", (_req, res) => {
         moods: "/api/moods",
         locations: "/api/locations",
         notes: "/api/notes",
+        notifications: "/api/notifications",
         health: "/health",
       },
     },
@@ -43,5 +45,6 @@ router.use("/photos", photoRoutes);
 router.use("/moods", moodRoutes);
 router.use("/locations", locationRoutes);
 router.use("/notes", noteRoutes);
+router.use("/notifications", notificationRoutes);
 
 export default router;

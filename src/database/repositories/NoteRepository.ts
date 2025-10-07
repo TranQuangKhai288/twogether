@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { Note, INote } from "../models/Note";
+import { Note, INote, NoteType } from "../models/Note";
 
 export class NoteRepository {
   /**
@@ -11,7 +11,11 @@ export class NoteRepository {
     title: string;
     content: string;
     tags?: string[];
+    type?: NoteType;
     isPrivate?: boolean;
+    reminderDate?: Date;
+    notificationEnabled?: boolean;
+    notificationSent?: boolean;
   }): Promise<INote> {
     const note = new Note({
       coupleId: new Types.ObjectId(noteData.coupleId),
@@ -19,7 +23,11 @@ export class NoteRepository {
       title: noteData.title,
       content: noteData.content,
       tags: noteData.tags || [],
+      type: noteData.type || NoteType.GENERAL,
       isPrivate: noteData.isPrivate || false,
+      reminderDate: noteData.reminderDate,
+      notificationEnabled: noteData.notificationEnabled || false,
+      notificationSent: noteData.notificationSent || false,
     });
 
     await note.save();
